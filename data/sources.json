@@ -1,0 +1,10 @@
+{
+  "description": "Daftar sumber resmi yang dipindai otomatis oleh Agent 1 (auto-scrape). Tiap entri: url (WAJIB cocok whitelist host di sources_whitelist.json) + wilayah (opsional, jadi hint wilayah_tag). Tambah/ubah daftar ini untuk memperluas Knowledge Base. URL yang gagal/404/bukan-bansos akan dilewati otomatis (F1.4).",
+  "sources": [
+    { "url": "https://kemensos.go.id/program-keluarga-harapan-pkh", "wilayah": "nasional" },
+    { "url": "https://kemensos.go.id/program-sembako", "wilayah": "nasional" },
+    { "url": "https://kemensos.go.id/bantuan-sosial", "wilayah": "nasional" },
+    { "url": "https://cekbansos.kemensos.go.id/", "wilayah": "nasional" },
+    { "url": "https://kemensos.go.id/", "wilayah": "nasional" }
+  ]
+}

@@ -1,0 +1,390 @@
+import path from 'node:path';
+import pino from 'pino';
+import qrcode from 'qrcode-terminal';
+import makeWASocket, {
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
+import { config, hasSearch } from '../config.js';
+import { getGrup, upsertGrup, countInfoByWilayah } from '../db/index.js';
+import { respondToMessage, GREETING } from '../agent2/handler.js';
+import { classifyIntent } from '../agent2/classify.js';
+import {
+  groupScopeTags,
+  normalizeWilayahTag,
+  inferProvinsiTag,
+  detectWilayahFromText,
+  isKabKota,
+  humanWilayah,
+} from '../util/wilayah.js';
+import { scrapeRegion } from '../agent1/scheduler.js';
+
+// Stateless bot: hanya cache efemeral siapa yang sudah disapa (tidak dipersist → privasi).
+const greeted = new Set();
+
+// Dedup pesan: cegah balasan dobel saat WhatsApp me-resync pesan yang sama (mis. setelah reconnect).
+const seenMsgIds = new Set();
+function alreadySeen(id) {
+  if (!id) return false;
+  if (seenMsgIds.has(id)) return true;
+  seenMsgIds.add(id);
+  if (seenMsgIds.size > 1000) seenMsgIds.delete(seenMsgIds.values().next().value);
+  return false;
+}
+
+// On-demand discovery: lacak daerah yang sedang dicari (anti-double) + cooldown agar
+// daerah yang barusan dicoba & nihil tidak di-scrape ulang tiap pesan.
+const regionJobs = new Set();
+const regionAttempts = new Map(); // wilayahTag -> ts terakhir dicoba
+const REGION_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 jam
+function recentlyAttempted(tag) {
+  const ts = regionAttempts.get(tag);
+  return ts && Date.now() - ts < REGION_COOLDOWN_MS;
+}
+
+// Single-flight reconnect: cegah banyak socket bertumpuk (akar penyebab badai code 440).
+let _connecting = false;
+let _reconnectTimer = null;
+
+// Error transien libsignal/kirim-saat-tutup tidak boleh mematikan proses bot.
+let _guardsInstalled = false;
+function installProcessGuards() {
+  if (_guardsInstalled) return;
+  _guardsInstalled = true;
+  process.on('unhandledRejection', (err) => {
+    console.warn('[bot] unhandledRejection diabaikan:', err?.message || err);
+  });
+  process.on('uncaughtException', (err) => {
+    console.warn('[bot] uncaughtException diabaikan:', err?.message || err);
+  });
+}
+
+/** Buka bungkus pesan (ephemeral/viewOnce/dll) agar contextInfo & teks terbaca. */
+function unwrap(message) {
+  let m = message;
+  for (let i = 0; i < 4 && m; i++) {
+    if (m.ephemeralMessage) m = m.ephemeralMessage.message;
+    else if (m.viewOnceMessage) m = m.viewOnceMessage.message;
+    else if (m.viewOnceMessageV2) m = m.viewOnceMessageV2.message;
+    else if (m.documentWithCaptionMessage) m = m.documentWithCaptionMessage.message;
+    else break;
+  }
+  return m || {};
+}
+
+function extractText(msg) {
+  const m = unwrap(msg.message);
+  if (!m) return '';
+  return (
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    ''
+  ).trim();
+}
+
+/** Bagian "user" dari sebuah JID tanpa device & domain: 628xx:12@s.whatsapp.net → 628xx */
+function userPart(jid) {
+  return String(jid || '').split('@')[0].split(':')[0];
+}
+
+/**
+ * Deteksi mention bot. Tahan terhadap:
+ * - device suffix (:12), domain beda (@s.whatsapp.net vs @lid)
+ * - identitas bot berupa nomor HP ATAU LID
+ * - balasan (reply) ke pesan bot
+ */
+function isMentioned(msg, sock) {
+  const m = unwrap(msg.message);
+  const ctx = m?.extendedTextMessage?.contextInfo || m?.contextInfo;
+  if (!ctx) return false;
+
+  const botNums = new Set([userPart(sock?.user?.id), userPart(sock?.user?.lid)].filter(Boolean));
+
+  const mentioned = ctx.mentionedJid || [];
+  if (mentioned.some((j) => botNums.has(userPart(j)))) return true;
+
+  // Reply ke pesan bot juga dihitung sebagai "memanggil bot".
+  if (ctx.participant && botNums.has(userPart(ctx.participant))) return true;
+
+  return false;
+}
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Tandai pesan sudah dibaca (centang biru). */
+async function markRead(sock, msg) {
+  try {
+    await sock.readMessages([msg.key]);
+  } catch {
+    /* abaikan */
+  }
+}
+
+/** Set status kehadiran (composing = "mengetik...", paused = berhenti). */
+async function presence(sock, jid, state) {
+  try {
+    await sock.sendPresenceUpdate(state, jid);
+  } catch {
+    /* abaikan */
+  }
+}
+
+function scheduleReconnect(delayMs = 3000) {
+  if (_reconnectTimer) return; // sudah ada reconnect yang dijadwalkan
+  _reconnectTimer = setTimeout(() => {
+    _reconnectTimer = null;
+    startBot().catch((e) => console.warn('[bot] reconnect gagal:', e?.message));
+  }, delayMs);
+}
+
+export async function startBot() {
+  installProcessGuards();
+  if (_connecting) return; // single-flight: jangan buat socket baru bila satu sedang berjalan
+  _connecting = true;
+
+  const { state, saveCreds } = await useMultiFileAuthState(config.wa.authDir);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: false,
+    markOnlineOnConnect: false,
+    syncFullHistory: false,
+  });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  let closedHandled = false; // satu socket → satu penanganan close
+  sock.ev.on('connection.update', (u) => {
+    const { connection, lastDisconnect, qr } = u;
+    if (qr) {
+      console.log('\n📱 Scan QR ini di WhatsApp (Perangkat Tertaut):\n');
+      qrcode.generate(qr, { small: true });
+    }
+    if (connection === 'open') {
+      const me = jidNormalizedUser(sock.user?.id);
+      console.log(`✅ Terhubung sebagai ${me}`);
+    }
+    if (connection === 'close') {
+      if (closedHandled) return;
+      closedHandled = true;
+      _connecting = false;
+      const code = lastDisconnect?.error?.output?.statusCode;
+
+      if (code === DisconnectReason.loggedOut) {
+        console.log(`❌ Logged out. Hapus folder ${config.wa.authDir} lalu jalankan ulang untuk scan QR baru.`);
+        return;
+      }
+      if (code === DisconnectReason.connectionReplaced) {
+        // Sesi digantikan koneksi lain (mis. Web/instance lain). Jangan dilawan → cegah badai 440.
+        console.log('⚠️ Sesi digantikan koneksi lain (440). Berhenti agar tidak bentrok. Pastikan hanya 1 instance.');
+        return;
+      }
+      // 515 restartRequired, 428 connectionClosed, 408 timeout, dll → reconnect sekali (terjadwal).
+      console.log(`⚠️ Koneksi tertutup (code=${code}). Mencoba ulang dalam 3 detik...`);
+      scheduleReconnect();
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+    const botJid = config.wa.botJid || jidNormalizedUser(sock.user?.id);
+
+    for (const msg of messages) {
+      try {
+        await handleOne(sock, msg, botJid);
+      } catch (err) {
+        console.error('[handler] error:', err.message);
+      }
+    }
+  });
+
+  return sock;
+}
+
+async function handleOne(sock, msg, botJid) {
+  // F2.3: abaikan pesan dari diri sendiri (cegah loop).
+  if (msg.key.fromMe) return;
+
+  // Cegah proses ganda atas pesan yang sama (resync/duplikat event).
+  if (alreadySeen(msg.key.id)) return;
+
+  const jid = msg.key.remoteJid;
+  if (!jid) return;
+
+  // F2.1: bedakan grup vs japri dari JID.
+  const isGroup = jid.endsWith('@g.us');
+  const text = extractText(msg);
+  if (!text) return;
+
+  const send = (body) => sock.sendMessage(jid, { text: body });
+
+  if (isGroup) {
+    await handleGroup(sock, jid, msg, text, botJid, send);
+  } else {
+    await handleJapri(sock, jid, msg, text, send);
+  }
+}
+
+async function handleGroup(sock, jid, msg, text, botJid, send) {
+  // /start → daftarkan grup + set wilayah.
+  if (/^\/start\b/i.test(text)) {
+    await markRead(sock, msg);
+    await presence(sock, jid, 'composing');
+    try {
+      const arg = text.replace(/^\/start\b/i, '').trim();
+      if (!arg) {
+        await send(
+          'Untuk mengaktifkan grup ini, kirim:\n`/start <daerah>`\nContoh: `/start Kab. Banyumas` atau `/start kabupaten:banyumas`',
+        );
+        return;
+      }
+      const wilayahTag = normalizeWilayahTag(arg);
+      const provinsiTag = inferProvinsiTag(wilayahTag);
+      upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
+      await send(
+        `✅ Grup terdaftar untuk wilayah *${arg}* (tag: ${wilayahTag}${provinsiTag ? `, ${provinsiTag}` : ''}).\n` +
+          `Mention saya (@) untuk tanya info atau cek kabar bansos. Saya hanya merespons saat di-mention di grup.`,
+      );
+    } finally {
+      await presence(sock, jid, 'paused');
+    }
+    return;
+  }
+
+  // F2.2: di grup, hanya merespons saat di-mention. Selain itu DIAM (tak tandai dibaca/ketik).
+  const mentioned = isMentioned(msg, sock);
+  if (process.env.WA_DEBUG) {
+    const ctx = unwrap(msg.message)?.extendedTextMessage?.contextInfo;
+    console.log('[grup-debug] mention=%s | bot.id=%s bot.lid=%s | mentionedJid=%j',
+      mentioned, sock?.user?.id, sock?.user?.lid, ctx?.mentionedJid || []);
+  }
+  if (!mentioned) return;
+
+  await markRead(sock, msg);
+  await presence(sock, jid, 'composing');
+  try {
+    const cleanText = text.replace(/@\d+/g, '').trim();
+    const grup = getGrup(jid);
+    const scopeTags = grup ? groupScopeTags(grup) : [config.defaultWilayahTag];
+    // Riwayat chat per-ORANG di dalam grup (bukan per-grup) → konteks follow-up tak kecampur antar warga.
+    const sender = userPart(msg.key.participant || msg.participant || jid);
+    await handleContent(sock, jid, {
+      text: cleanText || text,
+      konteks: 'grup',
+      scopeTags,
+      wilayahTag: grup?.wilayah_tag || null,
+      send,
+      sessionId: `${jid}:${sender}`,
+    });
+  } finally {
+    await presence(sock, jid, 'paused');
+  }
+}
+
+/**
+ * Jawab pesan berkonten, dan bila user menanyakan info untuk daerah yang BELUM ada di KB,
+ * picu on-demand scraping: balas "bentar ya" lalu follow-up otomatis setelah datanya ketemu.
+ */
+async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, justGreeted, send, sessionId }) {
+  // Daerah spesifik yang disebut user (atau wilayah grup) yang belum punya data lokal.
+  const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
+  const uncovered = target && isKabKota(target) && countInfoByWilayah(target) === 0;
+
+  // Hanya kalau ada peluang discovery, klasifikasi DULU (sekali) untuk memutuskan —
+  // tanpa menjawab dulu, supaya tak boros LLM & tak mengotori riwayat chat.
+  if (uncovered && hasSearch() && !recentlyAttempted(target)) {
+    const { jenis } = await classifyIntent(text);
+    if (jenis === 'info') {
+      if (regionJobs.has(target)) {
+        await send(`Sabar ya kak 🙏 info buat *${humanWilayah(target)}* lagi aku cariin, sebentar lagi aku kabarin.`);
+      } else {
+        regionAttempts.set(target, Date.now());
+        await send(
+          `Oke, soal bansos di *${humanWilayah(target)}* aku belum punya datanya nih. ` +
+            `Bentar ya, aku cariin dari situs resmi pemerintah dulu… 🔎 nanti aku kabarin lagi.`,
+        );
+        discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }); // background, JANGAN di-await
+      }
+      return;
+    }
+    // Bukan info → jawab normal, tapi kirim `jenis` agar tak klasifikasi 2x.
+    const { reply } = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId, jenis });
+    if (reply) await send(reply);
+    return;
+  }
+
+  const { reply } = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });
+  if (reply) await send(reply);
+}
+
+/** Proses latar belakang: scrape daerah lewat web search, lalu kirim follow-up berisi hasilnya. */
+async function discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }) {
+  regionJobs.add(target);
+  try {
+    await scrapeRegion(humanWilayah(target), target);
+
+    // Jawab ulang dengan scope yang mencakup daerah target (+ provinsinya).
+    const newScope = scopeTags
+      ? [...new Set([...scopeTags, target, inferProvinsiTag(target)].filter(Boolean))]
+      : null;
+    await presence(sock, jid, 'composing');
+    const { reply, grounded } = await respondToMessage({
+      text,
+      konteks,
+      scopeTags: newScope,
+      wilayahTag: target,
+      sessionId,
+    });
+
+    const found = countInfoByWilayah(target) > 0;
+    let out;
+    if (found && grounded) {
+      out = `Udah ketemu nih buat *${humanWilayah(target)}* 🙌\n\n${reply}`;
+    } else if (grounded) {
+      // Tak nemu khusus daerahnya, tapi ada program nasional yang tetap berlaku.
+      out =
+        `Aku belum nemu info bansos KHUSUS *${humanWilayah(target)}* di situs resmi 🙏 ` +
+        `Tapi ini yang berlaku umum/nasional buat kamu:\n\n${reply}`;
+    } else {
+      out =
+        `Maaf kak, udah aku cari di situs resmi tapi belum nemu info bansos buat *${humanWilayah(target)}* 🙏 ` +
+        `Coba cek langsung di cekbansos.kemensos.go.id atau tanya RT/pengurus setempat ya.`;
+    }
+    await sock.sendMessage(jid, { text: out });
+  } catch (e) {
+    console.warn('[ondemand] gagal:', e?.message);
+    await sock
+      .sendMessage(jid, { text: `Maaf kak, ada kendala pas nyari info *${humanWilayah(target)}*. Coba lagi nanti ya 🙏` })
+      .catch(() => {});
+  } finally {
+    regionJobs.delete(target);
+    await presence(sock, jid, 'paused');
+  }
+}
+
+async function handleJapri(sock, jid, msg, text, send) {
+  await markRead(sock, msg); // centang biru
+  await presence(sock, jid, 'composing'); // "mengetik..."
+
+  try {
+    // F2.6: pesan pertama di japri → sapaan pembuka (sekali per sesi proses).
+    let justGreeted = false;
+    if (!greeted.has(jid)) {
+      greeted.add(jid);
+      justGreeted = true;
+      await send(GREETING);
+    }
+    // Japri tidak terikat satu grup → tanpa filter wilayah (semua sumber resmi).
+    // justGreeted → handler tidak mengulang perkenalan kalau pesannya cuma sapaan.
+    await handleContent(sock, jid, { text, konteks: 'japri', scopeTags: null, wilayahTag: null, justGreeted, send, sessionId: jid });
+  } finally {
+    await presence(sock, jid, 'paused');
+  }
+}

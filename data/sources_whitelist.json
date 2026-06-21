@@ -1,0 +1,15 @@
+{
+  "description": "Daftar sumber resmi terkurasi (Bagian 3 & 7 PRD). Agent 1 hanya memproses URL yang host-nya cocok dengan salah satu pola di bawah.",
+  "allowedHostPatterns": [
+    "\\.go\\.id$",
+    "^go\\.id$",
+    "kemensos\\.go\\.id$",
+    "cekbansos\\.kemensos\\.go\\.id$",
+    "data\\.go\\.id$"
+  ],
+  "examples": [
+    "https://kemensos.go.id/",
+    "https://cekbansos.kemensos.go.id/",
+    "https://dinsos.banyumaskab.go.id/"
+  ]
+}

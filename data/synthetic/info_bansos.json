@@ -1,0 +1,70 @@
+[
+  {
+    "program": "Program Keluarga Harapan (PKH)",
+    "ringkasan": "Bantuan tunai untuk keluarga kurang mampu yang terdaftar di DTKS. Dana dipakai untuk kebutuhan ibu hamil, anak sekolah, dan lansia/penyandang disabilitas.",
+    "syarat": [
+      "Terdaftar di Data Terpadu Kesejahteraan Sosial (DTKS)",
+      "Termasuk keluarga kurang mampu",
+      "Memiliki komponen: ibu hamil, anak usia sekolah, lansia, atau penyandang disabilitas"
+    ],
+    "tanggal_penting": "Disalurkan per tahap (umumnya 4 tahap dalam setahun)",
+    "cara_daftar": "Daftar lewat usulan RT/RW ke desa/kelurahan agar masuk DTKS, atau usul mandiri via aplikasi Cek Bansos.",
+    "wilayah_tag": "nasional",
+    "sumber_url": "https://kemensos.go.id/program-keluarga-harapan",
+    "tanggal_ambil": "2026-06-01"
+  },
+  {
+    "program": "Bantuan Pangan Non Tunai (BPNT) / Sembako",
+    "ringkasan": "Bantuan senilai Rp200.000 per bulan lewat Kartu Keluarga Sejahtera untuk membeli bahan pangan (beras, telur, dll) di e-warong.",
+    "syarat": [
+      "Terdaftar di DTKS sebagai Keluarga Penerima Manfaat",
+      "Memiliki Kartu Keluarga Sejahtera (KKS)"
+    ],
+    "tanggal_penting": "Disalurkan bulanan",
+    "cara_daftar": "Otomatis bagi yang terdaftar di DTKS. Belanja di e-warong terdekat memakai KKS.",
+    "wilayah_tag": "nasional",
+    "sumber_url": "https://kemensos.go.id/bantuan-pangan-non-tunai",
+    "tanggal_ambil": "2026-06-01"
+  },
+  {
+    "program": "Program Indonesia Pintar (PIP)",
+    "ringkasan": "Bantuan biaya pendidikan untuk anak usia sekolah (6-21 tahun) dari keluarga kurang mampu, agar tidak putus sekolah.",
+    "syarat": [
+      "Berusia 6-21 tahun",
+      "Berasal dari keluarga miskin/rentan (diutamakan pemegang KIP atau terdaftar DTKS)",
+      "Terdaftar sebagai peserta didik di satuan pendidikan"
+    ],
+    "tanggal_penting": "Pencairan mengikuti jadwal Kemendikbud per termin",
+    "cara_daftar": "Diusulkan oleh sekolah/madrasah ke Dinas Pendidikan. Cek status di pip.kemdikbud.go.id.",
+    "wilayah_tag": "nasional",
+    "sumber_url": "https://pip.kemdikbud.go.id/",
+    "tanggal_ambil": "2026-06-01"
+  },
+  {
+    "program": "Bantuan Sosial Daerah Kabupaten Banyumas 2026",
+    "ringkasan": "Bantuan tambahan dari Pemkab Banyumas untuk warga rentan yang belum tercakup bansos pusat, berupa paket sembako dan bantuan tunai terbatas.",
+    "syarat": [
+      "KTP dan domisili Kabupaten Banyumas",
+      "Belum menerima PKH/BPNT pada periode berjalan",
+      "Direkomendasikan oleh RT/RW dan diverifikasi desa/kelurahan"
+    ],
+    "tanggal_penting": "Pendaftaran usulan dibuka tiap awal triwulan",
+    "cara_daftar": "Ajukan ke RT/RW setempat, lalu diverifikasi oleh Dinas Sosial Kabupaten Banyumas.",
+    "wilayah_tag": "kabupaten:banyumas",
+    "sumber_url": "https://dinsos.banyumaskab.go.id/bansos-daerah-2026",
+    "tanggal_ambil": "2026-06-05"
+  },
+  {
+    "program": "Bantuan Iuran Jaminan Kesehatan (PBI-JKN)",
+    "ringkasan": "Iuran BPJS Kesehatan kelas 3 dibayari pemerintah untuk warga kurang mampu, sehingga berobat di faskes tidak perlu bayar iuran.",
+    "syarat": [
+      "Terdaftar di DTKS",
+      "Belum menjadi peserta BPJS mandiri yang aktif"
+    ],
+    "tanggal_penting": "Kepesertaan aktif selama masih memenuhi kriteria DTKS",
+    "cara_daftar": "Diusulkan melalui dinas sosial daerah berdasarkan DTKS. Cek status kepesertaan di aplikasi Mobile JKN.",
+    "wilayah_tag": "nasional",
+    "sumber_url": "https://kemensos.go.id/pbi-jkn",
+    "tanggal_ambil": "2026-06-01"
+  }
+]

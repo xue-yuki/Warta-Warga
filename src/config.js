@@ -1,0 +1,96 @@
+import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const ROOT = path.resolve(__dirname, '..');
+
+const abs = (p) => (path.isAbsolute(p) ? p : path.resolve(ROOT, p));
+
+export const config = {
+  // LLM (OpenRouter, OpenAI-compatible)
+  openrouter: {
+    apiKey: process.env.OPENROUTER_API_KEY || '',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    fastModel: process.env.OPENROUTER_FAST_MODEL || 'openai/gpt-4o-mini',
+    deepModel: process.env.OPENROUTER_DEEP_MODEL || 'anthropic/claude-3.5-sonnet',
+    appUrl: process.env.OPENROUTER_APP_URL || 'https://github.com/wartawarga',
+    appName: process.env.OPENROUTER_APP_NAME || 'Warta Warga',
+  },
+
+  embeddings: {
+    provider: process.env.EMBEDDINGS_PROVIDER || 'local',
+    model: process.env.EMBEDDINGS_MODEL || 'Xenova/all-MiniLM-L6-v2',
+  },
+
+  dbPath: abs(process.env.DB_PATH || './data/warta.db'),
+
+  // Agent 1 auto-scrape: pindai data/sources.json secara berkala.
+  scrape: {
+    enabled: (process.env.SCRAPE_AUTO ?? 'true') !== 'false', // default nyala
+    onBoot: (process.env.SCRAPE_ON_BOOT ?? 'true') !== 'false', // scrape sekali saat start
+    intervalHours: Number(process.env.SCRAPE_INTERVAL_HOURS || 12),
+    sourcesPath: abs(process.env.SCRAPE_SOURCES || './data/sources.json'),
+  },
+
+  // Web search untuk on-demand discovery sumber daerah baru.
+  // Default GRATIS tanpa key: DuckDuckGo. Provider lain: brightdata/google/searxng/serper/brave.
+  search: {
+    provider:
+      process.env.SEARCH_PROVIDER ||
+      (process.env.BRIGHTDATA_API_TOKEN || process.env.BRIGHTDATA_BROWSER_WSS
+        ? 'brightdata'
+        : process.env.GOOGLE_API_KEY && process.env.GOOGLE_CSE_ID
+          ? 'google'
+          : process.env.SERPER_API_KEY
+            ? 'serper'
+            : process.env.BRAVE_API_KEY
+              ? 'brave'
+              : process.env.SEARXNG_URL
+                ? 'searxng'
+                : 'duckduckgo'),
+    serperKey: process.env.SERPER_API_KEY || '',
+    braveKey: process.env.BRAVE_API_KEY || '',
+    searxngUrl: process.env.SEARXNG_URL || '',
+    googleKey: process.env.GOOGLE_API_KEY || '',
+    googleCx: process.env.GOOGLE_CSE_ID || '',
+  },
+
+  // Bright Data. Dua mode (pilih salah satu):
+  //  - Browser mode  : Scraping Browser via Playwright (BRIGHTDATA_BROWSER_WSS). Browser remote
+  //                    buka Google & render halaman JS sendiri. (yang dipakai sekarang)
+  //  - REST mode      : SERP API + Web Unlocker via api.brightdata.com/request (token + 2 zone).
+  brightdata: {
+    token: process.env.BRIGHTDATA_API_TOKEN || '',
+    serpZone: process.env.BRIGHTDATA_SERP_ZONE || 'serp_api',
+    unlockerZone: process.env.BRIGHTDATA_UNLOCKER_ZONE || 'web_unlocker',
+    browserWss: process.env.BRIGHTDATA_BROWSER_WSS || '',
+  },
+
+  wa: {
+    authDir: abs(process.env.WA_AUTH_DIR || './auth_state'),
+    botJid: process.env.BOT_JID || '',
+  },
+
+  defaultWilayahTag: process.env.DEFAULT_WILAYAH_TAG || 'nasional',
+};
+
+export const hasLLM = () => Boolean(config.openrouter.apiKey);
+export const hasSearch = () => {
+  const s = config.search;
+  if (s.provider === 'serper') return Boolean(s.serperKey);
+  if (s.provider === 'brave') return Boolean(s.braveKey);
+  if (s.provider === 'searxng') return Boolean(s.searxngUrl);
+  if (s.provider === 'google') return Boolean(s.googleKey && s.googleCx);
+  if (s.provider === 'brightdata') {
+    const b = config.brightdata;
+    return Boolean(b.browserWss || (b.token && b.serpZone));
+  }
+  return true; // duckduckgo: gratis, tanpa key
+};
+
+// Scraping Browser (Playwright) untuk render halaman JS + buka Google sendiri.
+export const hasBrightDataBrowser = () => Boolean(config.brightdata.browserWss);
+// Render halaman JS (cekbansos dll) saat scrape biasa gagal — via browser ATAU Web Unlocker REST.
+export const hasBrightDataUnlocker = () =>
+  Boolean(config.brightdata.browserWss || (config.brightdata.token && config.brightdata.unlockerZone));

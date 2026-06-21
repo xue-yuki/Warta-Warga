@@ -1,0 +1,13 @@
+node_modules/
+.env
+*.log
+
+# Baileys auth state (berisi kredensial sesi WA — JANGAN commit)
+auth_state/
+auth_info*/
+
+# Local database & cache model embedding
+data/warta.db
+data/warta.db-*
+.cache/
+models/
