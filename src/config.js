@@ -8,10 +8,11 @@ export const ROOT = path.resolve(__dirname, '..');
 const abs = (p) => (path.isAbsolute(p) ? p : path.resolve(ROOT, p));
 
 export const config = {
-  // LLM (OpenRouter, OpenAI-compatible)
+  // LLM (OpenAI-compatible). Default OpenRouter; bisa diarahkan ke DeepSeek langsung
+  // (LLM_BASE_URL=https://api.deepseek.com) atau provider OpenAI-compatible lain.
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY || '',
-    baseUrl: 'https://openrouter.ai/api/v1',
+    baseUrl: process.env.LLM_BASE_URL || process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
     fastModel: process.env.OPENROUTER_FAST_MODEL || 'openai/gpt-4o-mini',
     deepModel: process.env.OPENROUTER_DEEP_MODEL || 'anthropic/claude-3.5-sonnet',
     appUrl: process.env.OPENROUTER_APP_URL || 'https://github.com/wartawarga',

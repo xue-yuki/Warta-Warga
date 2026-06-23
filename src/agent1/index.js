@@ -49,6 +49,7 @@ export async function storeStructured(info) {
     ringkasan: info.ringkasan,
     syarat: info.syarat || [],
     tanggal_penting: info.tanggal_penting || null,
+    batas_daftar: info.batas_daftar || null,
     cara_daftar: info.cara_daftar || null,
     wilayah_tag: wilayah, // F1.3
     sumber_url: info.sumber_url, // F1.2
@@ -60,5 +61,6 @@ export async function storeStructured(info) {
   const id = insertInfoBansos(record);
   const nChunks = await indexInfo(id, record);
   console.log(`[Agent1] OK  ${record.program} (${record.wilayah_tag}) → id=${id}, ${nChunks} chunk`);
-  return { ok: true, id, program: record.program, wilayah_tag: record.wilayah_tag, chunks: nChunks };
+  // `record` dikembalikan utuh agar pemanggil (scheduler) bisa broadcast info baru ke grup.
+  return { ok: true, id, program: record.program, wilayah_tag: record.wilayah_tag, chunks: nChunks, record: { id, ...record } };
 }

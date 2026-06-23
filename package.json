@@ -11,7 +11,9 @@
     "seed": "node scripts/seed.js",
     "ingest": "node src/ingest.js",
     "scrape": "node src/scrape.js",
-    "demo": "node scripts/demo.js"
+    "demo": "node scripts/demo.js",
+    "demo:broadcast": "node scripts/demo-broadcast.js",
+    "e2e:broadcast": "node scripts/e2e-broadcast.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.9",

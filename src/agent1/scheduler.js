@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { config, hasLLM, hasSearch } from '../config.js';
 import { ingestUrl } from './index.js';
 import { searchOfficialSources } from './search.js';
+import { broadcastNewInfos } from './broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
 
 // Auto-scrape Agent 1: pindai daftar sumber resmi (data/sources.json) secara berkala,
@@ -46,12 +47,15 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
   console.log(`[Agent1] 🔄 Auto-scrape (${reason}): ${sources.length} sumber resmi...`);
   let ok = 0;
   let skip = 0;
+  const fresh = [];
   try {
     for (const s of sources) {
       try {
         const r = await ingestUrl(s.url, { hintWilayah: s.wilayah, refresh: true });
-        if (r.ok) ok++;
-        else skip++;
+        if (r.ok) {
+          ok++;
+          if (r.record) fresh.push(r.record);
+        } else skip++;
       } catch (e) {
         skip++;
         console.warn(`[Agent1] SKIP ${s.url} — ${e.message}`);
@@ -61,6 +65,8 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
     _running = false;
   }
   console.log(`[Agent1] ✅ Auto-scrape selesai (${reason}): ${ok} tersimpan, ${skip} dilewati.`);
+  // Sebarkan info BARU ke grup terdaftar (dedup di dalam broadcastNewInfos).
+  await broadcastNewInfos(fresh).catch((e) => console.warn('[Broadcast] gagal:', e?.message));
   return { total: sources.length, ok, skip };
 }
 
@@ -121,14 +127,20 @@ export async function scrapeRegion(daerah, wilayahTag) {
   const list = [...urls].slice(0, 5);
   console.log(`[Agent1] 🔎 On-demand "${label}" (${wilayahTag}): ${list.length} kandidat sumber resmi.`);
   let ok = 0;
+  const fresh = [];
   for (const url of list) {
     try {
       const r = await ingestUrl(url, { hintWilayah: wilayahTag, refresh: true });
-      if (r.ok) ok++;
+      if (r.ok) {
+        ok++;
+        if (r.record) fresh.push(r.record);
+      }
     } catch (e) {
       console.warn(`[Agent1] SKIP ${url} — ${e.message}`);
     }
   }
   console.log(`[Agent1] ✅ On-demand "${label}": ${ok}/${list.length} tersimpan.`);
+  // Info daerah yang baru ditemukan juga disebar ke grup wilayah itu (bukan cuma ke penanya).
+  await broadcastNewInfos(fresh).catch((e) => console.warn('[Broadcast] gagal:', e?.message));
   return { ok, found: list.length, urls: list };
 }

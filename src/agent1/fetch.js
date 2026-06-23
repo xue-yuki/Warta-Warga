@@ -4,7 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { ROOT, hasBrightDataUnlocker } from '../config.js';
 import { bdUnlock } from './brightdata.js';
-import { hasBrowser, browserFetch } from './browser.js';
+import { hasBrowser, browserFetch, localFetch } from './browser.js';
 
 let _whitelist = null;
 function whitelist() {
@@ -57,12 +57,27 @@ export async function fetchAndParse(url) {
     lastErr = err.message;
   }
 
-  // 2) Fallback render JS hanya untuk domain NON-pemerintah.
-  // Bright Data memblokir domain .go.id (Government) → percuma & buang credit. Jadi .go.id
-  // cukup lewat axios di atas. Fallback browser/unlocker disediakan utk sumber lain (kalau ada).
   const host = safeHost(url);
   const isGov = host.endsWith('.go.id');
-  if (!isGov && hasBrightDataUnlocker()) {
+
+  // 2) Domain .go.id yang butuh JS: Bright Data MEMBLOKIR domain Government, jadi render pakai
+  // browser LOKAL (Chrome/Edge) — IP rumah pengguna bisa mengakses .go.id. Best-effort.
+  if (isGov) {
+    try {
+      const html = await localFetch(url);
+      if (html) {
+        const { text, title } = cleanHtml(html);
+        // Halaman SPA 404 ("Halaman Tidak Ditemukan") juga ter-render pendek → tetap dianggap gagal.
+        if (text && text.length >= 80) return { ok: true, text, title, via: 'local-browser' };
+      }
+    } catch (err) {
+      lastErr = `render lokal: ${err.message}`;
+    }
+    return { ok: false, error: lastErr };
+  }
+
+  // 3) Domain NON-pemerintah: render via Bright Data (browser remote / Web Unlocker).
+  if (hasBrightDataUnlocker()) {
     try {
       const html = hasBrowser() ? await browserFetch(url) : await bdUnlock(url);
       if (html) {

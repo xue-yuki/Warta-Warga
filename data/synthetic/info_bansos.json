@@ -55,6 +55,20 @@
     "tanggal_ambil": "2026-06-05"
   },
   {
+    "program": "Bantuan Sosial Daerah Kabupaten Bogor 2026",
+    "ringkasan": "Bantuan dari Pemkab Bogor untuk warga rentan berupa paket sembako dan bantuan tunai terbatas bagi keluarga yang belum tercakup bansos pusat.",
+    "syarat": [
+      "KTP dan domisili Kabupaten Bogor",
+      "Belum menerima PKH/BPNT pada periode berjalan",
+      "Direkomendasikan oleh RT/RW dan diverifikasi Dinas Sosial Kabupaten Bogor"
+    ],
+    "tanggal_penting": "Pendaftaran usulan dibuka tiap awal triwulan",
+    "cara_daftar": "Ajukan ke RT/RW setempat, lalu diverifikasi oleh Dinas Sosial Kabupaten Bogor.",
+    "wilayah_tag": "kabupaten:bogor",
+    "sumber_url": "https://dinsos.bogorkab.go.id/bansos-daerah-2026",
+    "tanggal_ambil": "2026-06-10"
+  },
+  {
     "program": "Bantuan Iuran Jaminan Kesehatan (PBI-JKN)",
     "ringkasan": "Iuran BPJS Kesehatan kelas 3 dibayari pemerintah untuk warga kurang mampu, sehingga berobat di faskes tidak perlu bayar iuran.",
     "syarat": [

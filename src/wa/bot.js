@@ -20,6 +20,7 @@ import {
   humanWilayah,
 } from '../util/wilayah.js';
 import { scrapeRegion } from '../agent1/scheduler.js';
+import { setBroadcaster } from '../agent1/broadcast.js';
 
 // Stateless bot: hanya cache efemeral siapa yang sudah disapa (tidak dipersist → privasi).
 const greeted = new Set();
@@ -170,11 +171,14 @@ export async function startBot() {
     if (connection === 'open') {
       const me = jidNormalizedUser(sock.user?.id);
       console.log(`✅ Terhubung sebagai ${me}`);
+      // Daftarkan pengirim broadcast agar Agent 1 bisa menyebar info baru ke grup.
+      setBroadcaster((jid, text) => sock.sendMessage(jid, { text }));
     }
     if (connection === 'close') {
       if (closedHandled) return;
       closedHandled = true;
       _connecting = false;
+      setBroadcaster(null); // sock mati → jangan broadcast lewat koneksi basi; daftar ulang saat 'open'.
       const code = lastDisconnect?.error?.output?.statusCode;
 
       if (code === DisconnectReason.loggedOut) {

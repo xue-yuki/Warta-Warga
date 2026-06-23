@@ -17,13 +17,27 @@ export function getDb() {
   _db.pragma('foreign_keys = ON');
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   _db.exec(schema);
+  // Migrasi ringan untuk DB lama: tambah kolom yang belum ada (CREATE IF NOT EXISTS tak menambah kolom).
+  ensureColumn(_db, 'info_bansos', 'batas_daftar', 'TEXT');
+  ensureColumn(_db, 'kb_chunks', 'batas_daftar', 'TEXT');
   return _db;
+}
+
+/** Tambah kolom bila belum ada (idempoten) — untuk migrasi skema tanpa kehilangan data. */
+function ensureColumn(db, table, col, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 }
 
 // ---------- Grup ----------
 
 export function getGrup(idGrup) {
   return getDb().prepare('SELECT * FROM grup WHERE id_grup = ?').get(idGrup);
+}
+
+/** Semua grup yang sudah /start (status_start=1) — target broadcast. */
+export function listActiveGrups() {
+  return getDb().prepare('SELECT * FROM grup WHERE status_start = 1').all();
 }
 
 export function upsertGrup({ idGrup, daerah, wilayahTag, provinsiTag }) {
@@ -48,14 +62,15 @@ export function insertInfoBansos(info) {
   const res = db
     .prepare(
       `INSERT INTO info_bansos
-        (program, ringkasan, syarat, tanggal_penting, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
-       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil)`,
+        (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
+       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil)`,
     )
     .run({
       program: info.program,
       ringkasan: info.ringkasan,
       syarat: JSON.stringify(info.syarat || []),
       tanggal_penting: info.tanggal_penting || null,
+      batas_daftar: info.batas_daftar || null,
       cara_daftar: info.cara_daftar || null,
       wilayah_tag: info.wilayah_tag,
       sumber_url: info.sumber_url,
@@ -85,13 +100,30 @@ export function deleteInfoBySource(sumberUrl) {
   return db.prepare('DELETE FROM info_bansos WHERE sumber_url = ?').run(sumberUrl).changes;
 }
 
+// ---------- broadcast_log (dedup siaran) ----------
+
+/** Apakah info dengan fingerprint ini sudah pernah di-broadcast? */
+export function wasBroadcast(fingerprint) {
+  return Boolean(getDb().prepare('SELECT 1 FROM broadcast_log WHERE fingerprint = ?').get(fingerprint));
+}
+
+/** Catat bahwa sebuah info sudah di-broadcast (idempoten via PK fingerprint). */
+export function markBroadcast({ fingerprint, program, wilayahTag, grupCount }) {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO broadcast_log (fingerprint, program, wilayah_tag, grup_count, ts)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(fingerprint, program || null, wilayahTag || null, grupCount ?? 0, new Date().toISOString());
+}
+
 // ---------- kb_chunks (vector store) ----------
 
 export function insertChunk(c) {
   getDb()
     .prepare(
-      `INSERT INTO kb_chunks (info_id, program, content, embedding, dim, sumber_url, wilayah_tag, tanggal_ambil)
-       VALUES (@info_id, @program, @content, @embedding, @dim, @sumber_url, @wilayah_tag, @tanggal_ambil)`,
+      `INSERT INTO kb_chunks (info_id, program, content, embedding, dim, sumber_url, wilayah_tag, tanggal_ambil, batas_daftar)
+       VALUES (@info_id, @program, @content, @embedding, @dim, @sumber_url, @wilayah_tag, @tanggal_ambil, @batas_daftar)`,
     )
     .run({
       info_id: c.info_id,
@@ -102,6 +134,7 @@ export function insertChunk(c) {
       sumber_url: c.sumber_url,
       wilayah_tag: c.wilayah_tag,
       tanggal_ambil: c.tanggal_ambil,
+      batas_daftar: c.batas_daftar || null,
     });
 }
 

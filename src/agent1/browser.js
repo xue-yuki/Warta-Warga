@@ -49,3 +49,37 @@ export async function browserFetch(url) {
     return page.content();
   });
 }
+
+// --- Browser LOKAL (Chrome/Edge terinstal) untuk render halaman SPA .go.id. ---
+// Bright Data memblokir domain Government (.go.id), tapi IP rumah pengguna bisa mengaksesnya.
+// Jadi untuk halaman .go.id yang butuh JavaScript, kita render pakai browser lokal pengguna.
+let _localChannel; // cache channel yang berhasil ('chrome' | 'msedge'); '' = tidak ada.
+
+/** Render URL via Chrome/Edge lokal headless. Best-effort: null jika tak ada browser/ gagal. */
+export async function localFetch(url, { timeout = 45000 } = {}) {
+  const channels = _localChannel ? [_localChannel] : ['chrome', 'msedge'];
+  for (const channel of channels) {
+    let browser;
+    try {
+      browser = await chromium.launch({ channel, headless: true });
+    } catch {
+      continue; // channel ini tidak terpasang → coba berikutnya
+    }
+    _localChannel = channel;
+    try {
+      const page = await browser.newPage();
+      page.setDefaultNavigationTimeout(timeout);
+      await page.goto(url, { waitUntil: 'networkidle' });
+      return await page.content();
+    } catch {
+      return null; // gagal render (mis. 404/timeout) → biar pemanggil yang putuskan
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  }
+  _localChannel = ''; // tak ada browser lokal sama sekali
+  return null;
+}
+
+/** Apakah ada browser lokal (Chrome/Edge) yang bisa dipakai render? */
+export const hasLocalBrowser = () => _localChannel !== '';

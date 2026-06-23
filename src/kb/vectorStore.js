@@ -50,6 +50,7 @@ export async function indexInfo(infoId, info) {
       sumber_url: info.sumber_url,
       wilayah_tag: info.wilayah_tag,
       tanggal_ambil: info.tanggal_ambil,
+      batas_daftar: info.batas_daftar || null,
     });
   });
   return chunks.length;

@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   program         TEXT NOT NULL,
   ringkasan       TEXT NOT NULL,             -- ringkasan_bahasa_sederhana
   syarat          TEXT,                       -- JSON array
-  tanggal_penting TEXT,
+  tanggal_penting TEXT,                        -- jadwal/penyaluran (teks, boleh berulang)
+  batas_daftar    TEXT,                        -- tenggat pendaftaran eksplisit (untuk cek masa berlaku)
   cara_daftar     TEXT,
   wilayah_tag     TEXT NOT NULL,             -- F1.3 WAJIB
   sumber_url      TEXT NOT NULL,             -- F1.2 WAJIB
@@ -36,7 +37,18 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
   dim           INTEGER NOT NULL,
   sumber_url    TEXT NOT NULL,
   wilayah_tag   TEXT NOT NULL,
-  tanggal_ambil TEXT NOT NULL
+  tanggal_ambil TEXT NOT NULL,
+  batas_daftar  TEXT                          -- tenggat pendaftaran (metadata; tidak di-embed) untuk peringatan masa berlaku
+);
+
+-- Jejak broadcast: cegah info yang sama dikirim ulang ke grup (dedup by fingerprint isi,
+-- bukan id, karena re-scrape menghapus+menyisipkan ulang baris info → id berubah).
+CREATE TABLE IF NOT EXISTS broadcast_log (
+  fingerprint TEXT PRIMARY KEY,          -- hash dari program+wilayah+ringkasan+tanggal_penting
+  program     TEXT,
+  wilayah_tag TEXT,
+  grup_count  INTEGER,                   -- berapa grup yang menerima
+  ts          TEXT NOT NULL
 );
 
 -- Log interaksi ANONIM — hanya untuk tren kebutuhan, tanpa identitas pribadi
