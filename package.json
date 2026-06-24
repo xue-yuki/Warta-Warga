@@ -17,6 +17,7 @@
     "demo:lapor": "node scripts/demo-lapor.js",
     "e2e:lapor": "node scripts/e2e-lapor.js",
     "test:brain": "node scripts/test-brain.js",
+    "test:checkurl": "node scripts/test-checkurl.js",
     "dashboard:demo": "node scripts/dashboard.js"
   },
   "dependencies": {

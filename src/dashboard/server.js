@@ -7,9 +7,13 @@
 // standalone), approve tetap tercatat tapi penyebaran ditunda (broadcastPeringatan → no-sender).
 
 import express from 'express';
-import { listAntrianApproval, listPrioritasBelumPasti, getLaporan, setApprovalLaporan } from '../db/index.js';
-import { broadcastPeringatan, formatPeringatan, hasBroadcaster } from '../agent1/broadcast.js';
+import { listAntrianApproval, listPrioritasBelumPasti, getLaporan, setApprovalLaporan, trendingModus } from '../db/index.js';
+import { broadcastPeringatan, formatPeringatan, hasBroadcaster, URGENT_THRESHOLD, broadcastTrenNasional } from '../agent1/broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
+import { humanModus } from '../agent2/lapor.js';
+
+const TREN_DAYS = 30;
+const trenItems = () => trendingModus({ days: TREN_DAYS, limit: 5 }).map((r) => ({ label: humanModus(r.modus_key), total: r.total }));
 
 const esc = (s) =>
   String(s ?? '')
@@ -20,9 +24,11 @@ const esc = (s) =>
 
 function kartu(l, { prioritas = false } = {}) {
   const preview = formatPeringatan(l);
+  const urgent = l.jumlah_serupa >= URGENT_THRESHOLD;
   return `
-  <div class="card${prioritas ? ' prio' : ''}">
+  <div class="card${prioritas ? ' prio' : ''}${urgent ? ' urgent' : ''}">
     <div class="head">
+      ${urgent ? '<span class="badge b-urgent">🚨 URGENT</span>' : ''}
       <span class="badge ${prioritas ? 'b-prio' : 'b-tipu'}">${prioritas ? 'PRIORITAS TINJAU' : 'JELAS PENIPUAN'}</span>
       <span class="wil">📍 ${esc(humanWilayah(l.wilayah_tag))}</span>
       <span class="cnt">📈 ${l.jumlah_serupa} laporan serupa</span>
@@ -58,9 +64,13 @@ function halaman({ flash } = {}) {
     .flash{background:#eff6ff;border:1px solid #bfdbfe;padding:10px 12px;border-radius:8px;margin:10px 0;font-size:14px}
     .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
     .card.prio{border-left:4px solid #f59e0b}
+    .card.urgent{border-left:4px solid #ef4444;box-shadow:0 0 0 1px #fecaca,0 1px 3px rgba(239,68,68,.2)}
+    .b-urgent{background:#ef4444;color:#fff}
     .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:8px}
     .badge{font-weight:700;padding:2px 8px;border-radius:6px}
     .b-tipu{background:#fee2e2;color:#991b1b}.b-prio{background:#fef3c7;color:#92400e}
+    .b-tren{background:#dbeafe;color:#1e40af}.card.tren{border-left:4px solid #3b82f6}
+    .trenlist{margin:8px 0;padding-left:22px}.trenlist li{margin:3px 0}
     .wil,.cnt{color:#374151}.id{margin-left:auto;color:#9ca3af}
     .modus{margin:6px 0}.dasar{font-size:13px;color:#4b5563;margin:6px 0}
     label{display:block;font-size:12px;color:#6b7280;margin-top:8px}
@@ -75,6 +85,18 @@ function halaman({ flash } = {}) {
   <div class="sub">Tinjau laporan penipuan, lalu <b>Approve</b> untuk menyebar peringatan ke grup sewilayah.
     Status bot: <span class="status ${online ? 'on' : 'off'}">${online ? 'terhubung WhatsApp' : 'tidak terhubung (penyebaran ditunda)'}</span></div>
   ${flash ? `<div class="flash">${esc(flash)}</div>` : ''}
+  ${(() => {
+    const items = trenItems();
+    if (!items.length) return '';
+    const list = items.map((it, i) => `<li><b>${esc(it.label)}</b> — ${it.total} laporan</li>`).join('');
+    return `<div class="card tren">
+      <div class="head"><span class="badge b-tren">📊 LAGI MARAK</span><span class="wil">Nasional · ${TREN_DAYS} hari terakhir</span></div>
+      <ol class="trenlist">${list}</ol>
+      <form method="POST" action="/tren/sebar-nasional" onsubmit="return confirm('Sebar digest ini ke SEMUA grup terdaftar?')">
+        <div class="actions"><button class="ok" type="submit">📢 Sebar digest ke semua grup</button></div>
+      </form>
+    </div>`;
+  })()}
   <h2 style="font-size:15px">Menunggu approval (${antrian.length})</h2>
   ${antrian.length ? antrian.map((l) => kartu(l)).join('') : '<div class="empty">Tidak ada antrian. 🎉</div>'}
   ${prioritas.length ? `<h2 style="font-size:15px">Prioritas tinjau — laporan menumpuk (${prioritas.length})</h2>${prioritas.map((l) => kartu(l, { prioritas: true })).join('')}` : ''}
@@ -96,6 +118,16 @@ export function createDashboardApp() {
       r.sent > 0
         ? `✅ Laporan #${id} disetujui & peringatan disebar ke ${r.sent} grup.`
         : `✅ Laporan #${id} disetujui. Penyebaran tertunda (${r.reason || 'tidak ada grup/koneksi'}).`;
+    res.redirect('/?flash=' + encodeURIComponent(flash));
+  });
+
+  app.post('/tren/sebar-nasional', async (req, res) => {
+    const items = trenItems();
+    const r = await broadcastTrenNasional(items, { scope: 'Nasional', days: TREN_DAYS }).catch((e) => ({ sent: 0, reason: e.message }));
+    const flash =
+      r.sent > 0
+        ? `📢 Digest "lagi marak" disebar ke ${r.sent} grup.`
+        : `Digest belum tersebar (${r.reason || 'tidak ada data/grup/koneksi'}).`;
     res.redirect('/?flash=' + encodeURIComponent(flash));
   });
 

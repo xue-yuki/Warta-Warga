@@ -7,6 +7,7 @@ import { hasLLM } from '../config.js';
 import { checkClaim } from './claim.js';
 import { detectWilayahFromText, normalizeWilayahTag, humanWilayah, isKabKota } from '../util/wilayah.js';
 import { insertLaporan, findClusterLaporan, bumpLaporanSerupa } from '../db/index.js';
+import { notifyPengurusUrgent, URGENT_THRESHOLD } from '../agent1/broadcast.js';
 
 // Pola modus penipuan UMUM (bukan cuma bansos) → eskalasi ke "jelas_penipuan" walau tak
 // bertentangan sumber (PRD: "cocok pola"). Daftar ini sengaja luas; modus baru yang belum
@@ -32,6 +33,39 @@ const SCAM_PATTERNS = [
 export function matchScamPattern(text) {
   for (const p of SCAM_PATTERNS) if (p.re.test(text)) return p.key;
   return null;
+}
+
+/**
+ * Saring PII yang masih bisa lolos dari ringkasan/peringatan LLM (jaring pengaman, BUKAN andalan tunggal).
+ * Buang nomor panjang (HP/rekening/NIK), NIK eksplisit, & email — yang nyangkut ke DB + broadcast.
+ * Nama orang tak bisa diandalkan via regex → ditahan di prompt ("tanpa identitas").
+ */
+export function scrubPII(s) {
+  if (!s) return s;
+  return String(s)
+    .replace(/\bnik\s*:?\s*\d[\d\s.\-]*\d/gi, '[data disensor]')
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '[data disensor]')
+    .replace(/\b\d[\d .\-]{7,}\d\b/g, '[data disensor]') // rangkaian digit panjang (≥9)
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+// Label manusiawi untuk modus_key (dipakai digest "lagi marak" & dashboard).
+const MODUS_LABEL = {
+  biaya_pencairan: 'minta biaya pencairan/administrasi',
+  minta_transfer: 'minta transfer/kirim uang',
+  minta_pulsa: 'minta pulsa/voucher',
+  link_palsu: 'link/aplikasi (APK) palsu',
+  minta_data_pribadi: 'minta OTP/PIN/data pribadi',
+  undian_hadiah_palsu: 'undian/hadiah palsu',
+  lowongan_palsu: 'lowongan kerja palsu',
+  investasi_bodong: 'investasi/trading bodong',
+  pinjol_ilegal: 'pinjol ilegal',
+  ngaku_petugas: 'ngaku petugas/bank/instansi',
+  lainnya: 'modus lainnya',
+};
+export function humanModus(key) {
+  return MODUS_LABEL[key] || String(key || 'modus lainnya').replace(/_/g, ' ');
 }
 
 // Petakan label verifikasi (claim.js) → status laporan (PRD §2).
@@ -167,7 +201,9 @@ export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_ba
   }
 
   const status = ['jelas_penipuan', 'belum_pasti', 'bukan_penipuan'].includes(tingkat_bahaya) ? tingkat_bahaya : 'belum_pasti';
-  const isiRingkas = String(ringkasan_modus || '').slice(0, 300) || 'Laporan modus penipuan dari warga.';
+  // Saring PII SEBELUM disimpan/disebar (jaring pengaman; modus_key dideteksi dari teks yang sudah bersih).
+  const isiRingkas = scrubPII(String(ringkasan_modus || '').slice(0, 300)) || 'Laporan modus penipuan dari warga.';
+  const teksPeringatan = scrubPII(String(teks_peringatan || '').trim()) || FALLBACK_PERINGATAN;
   const modusKey = matchScamPattern(isiRingkas) || 'lainnya';
 
   // Cluster hanya untuk modus SPESIFIK (modus + wilayah + status sama) — 'lainnya' jangan digabung.
@@ -177,6 +213,8 @@ export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_ba
   if (existing) {
     laporan = bumpLaporanSerupa(existing.id);
     clustered = true;
+    // Fast-track: pas nyentuh ambang (sekali), ping pengurus untuk segera tinjau. Bukan auto-sebar.
+    if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => {});
   } else {
     const id = insertLaporan({
       isiRingkas,
@@ -184,7 +222,7 @@ export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_ba
       wilayahTag,
       status,
       dasarVerifikasi: 'Dilaporkan warga; dinilai asisten Warta Warga.',
-      teksPeringatan: String(teks_peringatan || '').trim() || FALLBACK_PERINGATAN,
+      teksPeringatan,
     });
     laporan = { id, jumlah_serupa: 1 };
   }

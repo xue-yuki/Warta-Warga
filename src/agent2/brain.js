@@ -10,8 +10,10 @@
 import { chatWithTools, chat } from '../llm/openrouter.js';
 import { hasLLM } from '../config.js';
 import { search } from '../kb/vectorStore.js';
-import { simpanLaporanTool } from './lapor.js';
-import { humanWilayah } from '../util/wilayah.js';
+import { trendingModus } from '../db/index.js';
+import { simpanLaporanTool, humanModus } from './lapor.js';
+import { inspectUrl } from './checkurl.js';
+import { humanWilayah, normalizeWilayahTag, isKabKota } from '../util/wilayah.js';
 
 const MIN_SCORE = 0.25;
 const MAX_STEPS = 4; // batas putaran tool-calling agar tak loop tak berujung
@@ -29,6 +31,12 @@ PUNYA TOOLS — pakai dengan inisiatifmu sendiri:
   bansos ATAU memverifikasi sebuah klaim/kabar. DILARANG menjawab fakta bansos dari ingatanmu sendiri.
   Kalau hasilnya kosong: jujur bilang belum punya infonya dari sumber resmi, sarankan cek
   cekbansos.kemensos.go.id atau tanya RT/pengurus. Jangan mengarang.
+- tren_penipuan(wilayah?) : panggil saat warga tanya modus yang LAGI MARAK ("lagi rame penipuan apa?",
+  "modus apa yang lagi banyak?"). Jawab dari data laporan warga (angkanya real), bukan karanganmu.
+- cek_url(url) : panggil SETIAP warga mengirim/menanyakan sebuah link/URL yang ingin dicek keamanannya.
+  Tool membuka samaran shortener, cek domain resmi/palsu, dan deteksi halaman minta login/OTP atau file
+  .apk. Jelaskan hasilnya ke warga + edukasi (kenapa bahaya, jangan klik/isi data, blokir). JANGAN menilai
+  link dari tebakan — cek dulu.
 - catat_laporan(ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan) : panggil saat warga
   MELAPORKAN penipuan untuk diteruskan jadi peringatan warga lain, DAN kamu sudah tahu (a) modusnya &
   (b) kabupaten/kota kejadian. Kalau belum jelas, TANYA dulu secara natural — jangan catat dulu.
@@ -81,6 +89,36 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'tren_penipuan',
+      description:
+        'Lihat modus penipuan yang LAGI MARAK dari laporan warga (data internal Warta Warga). Panggil saat warga tanya "lagi marak penipuan apa?", "modus apa yang lagi banyak?", "penipuan rame apa sekarang?". Bisa difilter per kabupaten/kota.',
+      parameters: {
+        type: 'object',
+        properties: {
+          wilayah: { type: 'string', description: 'Opsional: batasi ke kabupaten/kota tertentu, mis. "Banyumas". Kosongkan untuk nasional.' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cek_url',
+      description:
+        'Periksa keamanan sebuah link/URL yang dikirim atau ditanyakan warga: buka samaran shortener (bit.ly dll), cek domain resmi (.go.id) vs palsu/mirip, deteksi halaman minta login/OTP/NIK, dan file unduhan (.apk). Panggil setiap ada link mencurigakan sebelum menilainya.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL/link yang mau dicek, mis. "bit.ly/bsu-cair" atau "https://...".' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'catat_laporan',
       description:
         'Catat laporan penipuan warga ke pipeline peringatan dini (ditinjau pengurus dulu sebelum disebar). Panggil HANYA bila warga melaporkan modus penipuan DAN modus + kabupaten/kota sudah jelas.',
@@ -118,6 +156,14 @@ const FALLBACK_REPLY =
   'Maaf, lagi ada gangguan di sistemku 🙏 Coba kirim lagi pesannya sebentar ya. ' +
   'Aku bisa bantu info bansos atau cek kabar/laporan penipuan.';
 
+// Penegak grounding (#1): deteksi balasan yang MENGKLAIM fakta/angka bansos. Kalau ini muncul tanpa
+// pernah memanggil cari_sumber_resmi → kemungkinan dari pengetahuan umum LLM (rawan halu) → paksa cari.
+const BANSOS_TERM = /\b(pkh|bpnt|sembako|pip|kis|kip|blt|bst|pbi|bansos|bantuan sosial|program keluarga harapan|dtks|dtsen)\b/i;
+const FACT_SIGNAL = /\b(rp\s?\d|\d+\s?(ribu|rb|juta|jt)|\d+\s?%|per ?tahap|per ?bulan|tiap \d|syarat(nya)?|jadwal|pencairan|cair)\b/i;
+function assertsBansosFact(text) {
+  return BANSOS_TERM.test(text) && FACT_SIGNAL.test(text);
+}
+
 /**
  * Proses satu pesan secara agentic: LLM memutuskan tool & menjawab.
  * @param {string} text
@@ -139,9 +185,12 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
   }
   messages.push(...history, { role: 'user', content: text });
 
-  const usedSources = new Set();
+  const usedSources = new Set(); // URL sumber resmi (untuk footer "Sumber:")
+  const allowedUrls = new Set(); // URL yang boleh tampil utuh di balasan (sumber ∪ URL yang dicek cek_url)
   let aksi = 'ngobrol';
   let grounded = false;
+  let searched = false; // apakah cari_sumber_resmi sudah dipanggil giliran ini?
+  let nudgedGrounding = false; // penegak grounding hanya sekali (cegah loop)
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -152,7 +201,22 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
       if (!calls.length) {
         let reply = (msg?.content || '').trim();
         if (!reply) return { reply: FALLBACK_REPLY, aksi, label: null, grounded };
-        reply = maybeAppendSumber(sanitizeUrls(reply, usedSources), usedSources);
+
+        // Penegak grounding: ngaku fakta bansos tanpa pernah cari sumber → paksa cari dulu (sekali).
+        if (!searched && !nudgedGrounding && !lastStep && assertsBansosFact(reply)) {
+          nudgedGrounding = true;
+          messages.push(msg);
+          messages.push({
+            role: 'system',
+            content:
+              'PENGINGAT: kamu menyebut fakta/angka/syarat bansos tanpa memanggil cari_sumber_resmi. ' +
+              'WAJIB panggil cari_sumber_resmi dulu untuk memverifikasi dari sumber resmi. Kalau hasilnya ' +
+              'kosong, JUJUR bilang belum punya datanya dari sumber resmi — jangan menebak angka/syarat.',
+          });
+          continue;
+        }
+
+        reply = maybeAppendSumber(sanitizeUrls(reply, allowedUrls), usedSources);
         return { reply, aksi, label: null, grounded };
       }
 
@@ -167,14 +231,36 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
         }
         let result;
         if (tc.function?.name === 'cari_sumber_resmi') {
+          searched = true;
           if (aksi !== 'lapor') aksi = 'info';
           const q = [args.kueri, args.wilayah].filter(Boolean).join(' ');
           const hits = (await search(q || text, { scopeTags, k: 4 })).filter((h) => h.score >= MIN_SCORE);
           if (hits.length) grounded = true;
-          hits.forEach((h) => usedSources.add(h.sumber_url));
+          hits.forEach((h) => {
+            usedSources.add(h.sumber_url);
+            allowedUrls.add(h.sumber_url);
+          });
           result = hits.length
             ? hits.map((h, i) => `[${i + 1}] (sumber: ${h.sumber_url})\n${h.content}`).join('\n\n')
             : 'TIDAK ADA hasil di sumber resmi terkurasi untuk kueri ini.';
+        } else if (tc.function?.name === 'tren_penipuan') {
+          if (aksi !== 'lapor') aksi = 'info';
+          const wt = args.wilayah ? normalizeWilayahTag(args.wilayah) : wilayahTag;
+          const rows = trendingModus({ days: 30, limit: 5, wilayahTag: isKabKota(wt) ? wt : null });
+          result = rows.length
+            ? JSON.stringify({
+                cakupan: isKabKota(wt) ? humanWilayah(wt) : 'Nasional',
+                periode: '30 hari terakhir',
+                modus: rows.map((r) => ({ modus: humanModus(r.modus_key), jumlah_laporan: r.total })),
+              })
+            : 'Belum ada laporan terkumpul untuk dirangkum jadi tren.';
+        } else if (tc.function?.name === 'cek_url') {
+          if (aksi !== 'lapor') aksi = 'info';
+          const r = await inspectUrl(args.url);
+          // Izinkan URL yang dicek tampil utuh di balasan (jangan ke-mangle jadi "[sumber resmi]").
+          if (r.input_url) allowedUrls.add(r.input_url);
+          if (r.final_url) allowedUrls.add(r.final_url);
+          result = JSON.stringify(r);
         } else if (tc.function?.name === 'catat_laporan') {
           aksi = 'lapor';
           result = JSON.stringify(simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags }));
@@ -188,7 +274,7 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
     // Jangan jatuh ke balasan bisu yang menghapus konteks — coba sekali tanpa tool, lalu fallback.
     try {
       const recover = await chat({ tier: 'fast', temperature: 0.4, maxTokens: 300, messages });
-      if (recover && recover.trim()) return { reply: sanitizeUrls(recover.trim(), usedSources), aksi, label: null, grounded };
+      if (recover && recover.trim()) return { reply: sanitizeUrls(recover.trim(), allowedUrls), aksi, label: null, grounded };
     } catch {
       /* abaikan */
     }

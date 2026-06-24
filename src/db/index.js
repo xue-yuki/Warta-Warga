@@ -166,6 +166,27 @@ export function getLaporan(id) {
   return getDb().prepare('SELECT * FROM laporan WHERE id = ?').get(id);
 }
 
+/**
+ * Agregat modus penipuan yang lagi marak dari laporan warga (untuk digest "waspada nasional").
+ * Hanya hitung yang berstatus penipuan/belum pasti (bukan_penipuan dikecualikan). Grounded di data
+ * laporan asli — bukan scraping. Bisa difilter per wilayah; default nasional (semua wilayah).
+ * @returns {Array<{modus_key:string, total:number, klaster:number}>}
+ */
+export function trendingModus({ days = 30, limit = 5, wilayahTag = null } = {}) {
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const params = [cutoff];
+  let sql = `SELECT modus_key, SUM(jumlah_serupa) AS total, COUNT(*) AS klaster
+             FROM laporan
+             WHERE timestamp >= ? AND status IN ('jelas_penipuan','belum_pasti')`;
+  if (wilayahTag) {
+    sql += ' AND wilayah_tag = ?';
+    params.push(wilayahTag);
+  }
+  sql += ' GROUP BY modus_key ORDER BY total DESC, klaster DESC LIMIT ?';
+  params.push(limit);
+  return getDb().prepare(sql).all(...params);
+}
+
 /** Antrian approval: jelas_penipuan yang masih menunggu (L4). Prioritas: terbanyak dulu. */
 export function listAntrianApproval() {
   return getDb()

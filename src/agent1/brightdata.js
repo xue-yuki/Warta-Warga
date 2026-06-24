@@ -40,9 +40,9 @@ export async function bdSerp(query, { num = 20 } = {}) {
 }
 
 /** Web Unlocker: ambil HTML sebuah halaman (render JS) → string HTML, atau null bila gagal. */
-export async function bdUnlock(url) {
+export async function bdUnlock(url, { timeout = 60000 } = {}) {
   if (!config.brightdata.unlockerZone) return null;
-  const data = await bdRequest(config.brightdata.unlockerZone, url);
+  const data = await bdRequest(config.brightdata.unlockerZone, url, { timeout });
   if (typeof data === 'string') return data;
   return data?.body || (data ? JSON.stringify(data) : null);
 }

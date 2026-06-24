@@ -42,12 +42,20 @@ export async function browserSearch(query, { limit = 10 } = {}) {
   });
 }
 
-/** Buka sebuah URL, tunggu render JS, kembalikan HTML jadinya. */
-export async function browserFetch(url) {
-  return withPage(async (page) => {
-    await page.goto(url, { waitUntil: 'networkidle' });
-    return page.content();
-  });
+/**
+ * Buka sebuah URL, tunggu render JS, kembalikan HTML jadinya.
+ * Default: networkidle/60s (dipakai scraper KB). cek_url memakai opsi lebih cepat:
+ * domcontentloaded + jeda settle pendek + timeout ketat.
+ */
+export async function browserFetch(url, { waitUntil = 'networkidle', timeout = 60000, settleMs = 0 } = {}) {
+  return withPage(
+    async (page) => {
+      await page.goto(url, { waitUntil });
+      if (settleMs) await page.waitForTimeout(settleMs);
+      return page.content();
+    },
+    { timeout },
+  );
 }
 
 // --- Browser LOKAL (Chrome/Edge terinstal) untuk render halaman SPA .go.id. ---

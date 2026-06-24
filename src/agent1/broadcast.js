@@ -161,6 +161,39 @@ export async function broadcastNewInfos(records) {
 
 // ===================== PERINGATAN DINI (Fitur Lapor) =====================
 
+// Ambang "fast-track": laporan serupa sebanyak ini → ditandai URGENT + pengurus dinotif.
+// Tetap WAJIB approval manusia (Lapis 2) — notif hanya mempercepat peninjauan, bukan auto-sebar.
+export const URGENT_THRESHOLD = Number(process.env.LAPOR_URGENT_THRESHOLD) || 3;
+
+const PENGURUS_JID = process.env.PENGURUS_JID || null; // nomor/grup admin (mis. "628xx@s.whatsapp.net" / "xxx@g.us")
+const DASHBOARD_URL = `http://127.0.0.1:${Number(process.env.DASHBOARD_PORT) || 3210}`;
+
+/**
+ * Notifikasi ke pengurus saat laporan serupa menumpuk (≥ URGENT_THRESHOLD). TIDAK menyebar
+ * peringatan — cuma "ping" agar pengurus segera meninjau & approve di dashboard.
+ * @returns {Promise<boolean>} true bila notif WA terkirim ke pengurus
+ */
+export async function notifyPengurusUrgent(laporan) {
+  const judul = `🚨 *URGENT* — ${laporan.jumlah_serupa} laporan serupa di ${humanWilayah(laporan.wilayah_tag)}`;
+  const body =
+    `${judul}\n\n` +
+    `*Modus:* ${laporan.isi_ringkas || laporan.modus_key}\n` +
+    `*Status:* ${laporan.status}\n\n` +
+    `Segera tinjau & approve (atau tolak) di dashboard:\n${DASHBOARD_URL}`;
+  if (_sender && PENGURUS_JID) {
+    try {
+      await _sender(PENGURUS_JID, body);
+      console.log(`[Peringatan] 🚨 notif URGENT → pengurus (laporan #${laporan.id}).`);
+      return true;
+    } catch (e) {
+      console.warn(`[Peringatan] gagal notif pengurus: ${e?.message}`);
+    }
+  }
+  // Fallback bila PENGURUS_JID belum diset / bot offline → tetap kelihatan di log + badge dashboard.
+  console.warn(`[Peringatan] 🚨 URGENT (set PENGURUS_JID utk notif WA): ${judul} — tinjau di ${DASHBOARD_URL}`);
+  return false;
+}
+
 /** Susun kartu peringatan dini. UMUM & tanpa identitas pelapor (Rambu 2 PRD). */
 export function formatPeringatan(laporan) {
   const lines = [`⚠️ *Peringatan Dini Penipuan — ${humanWilayah(laporan.wilayah_tag)}*`, ''];
@@ -184,6 +217,30 @@ export function formatPeringatan(laporan) {
  * Reuse: filter wilayah (§6.3), opt-in (/start), jeda acak anti-spam, dedup (peringatan_terkirim).
  * @returns {Promise<{sent:number, grupCount:number, reason?:string}>}
  */
+/** Kartu digest "lagi marak" (nasional/regional). items = [{label, total}] sudah berlabel manusiawi. */
+export function formatTrenDigest(items, { scope = 'Nasional', days = 30 } = {}) {
+  const lines = [`📊 *Waspada Penipuan — ${scope}*`, '', `Modus yang lagi marak (laporan warga, ${days} hari terakhir):`];
+  items.forEach((it, i) => lines.push(`${i + 1}. *${it.label}* — ${it.total} laporan`));
+  lines.push(
+    '',
+    'Ingat: jangan transfer uang/pulsa, kasih OTP/PIN/data pribadi, atau klik link ke pihak yang mencurigakan. Cek dulu ke sumber resmi atau tanya RT/pengurus.',
+    '',
+    '_Rekap otomatis Warta Warga dari laporan warga._',
+  );
+  return lines.join('\n');
+}
+
+/** Sebar digest "lagi marak" ke SEMUA grup terdaftar. Dipicu pengurus (bukan auto). */
+export async function broadcastTrenNasional(items, opts = {}) {
+  if (!_sender) return { sent: 0, reason: 'no-sender' };
+  if (!items?.length) return { sent: 0, reason: 'tak-ada-data' };
+  const targets = listActiveGrups();
+  if (!targets.length) return { sent: 0, reason: 'tak-ada-grup' };
+  const okGrup = await sendToGrups(targets, formatTrenDigest(items, opts));
+  if (okGrup > 0) console.log(`[Tren] 📊 digest "lagi marak" → ${okGrup} grup.`);
+  return { sent: okGrup };
+}
+
 export async function broadcastPeringatan(laporan) {
   if (!_sender) return { sent: 0, grupCount: 0, reason: 'no-sender' }; // bot offline → tunda diam-diam
   if (!laporan || laporan.status_approval !== 'disetujui') {
