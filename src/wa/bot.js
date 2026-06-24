@@ -10,7 +10,6 @@ import makeWASocket, {
 import { config, hasSearch } from '../config.js';
 import { getGrup, upsertGrup, countInfoByWilayah } from '../db/index.js';
 import { respondToMessage, GREETING } from '../agent2/handler.js';
-import { classifyIntent } from '../agent2/classify.js';
 import {
   groupScopeTags,
   normalizeWilayahTag,
@@ -301,31 +300,25 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
   const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
   const uncovered = target && isKabKota(target) && countInfoByWilayah(target) === 0;
 
-  // Hanya kalau ada peluang discovery, klasifikasi DULU (sekali) untuk memutuskan —
-  // tanpa menjawab dulu, supaya tak boros LLM & tak mengotori riwayat chat.
-  if (uncovered && hasSearch() && !recentlyAttempted(target)) {
-    const { jenis } = await classifyIntent(text);
-    if (jenis === 'info') {
-      if (regionJobs.has(target)) {
-        await send(`Sabar ya kak 🙏 info buat *${humanWilayah(target)}* lagi aku cariin, sebentar lagi aku kabarin.`);
-      } else {
-        regionAttempts.set(target, Date.now());
-        await send(
-          `Oke, soal bansos di *${humanWilayah(target)}* aku belum punya datanya nih. ` +
-            `Bentar ya, aku cariin dari situs resmi pemerintah dulu… 🔎 nanti aku kabarin lagi.`,
-        );
-        discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }); // background, JANGAN di-await
-      }
-      return;
+  // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
+  // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
+  const result = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });
+
+  if (result.aksi === 'info' && uncovered && hasSearch() && !recentlyAttempted(target)) {
+    if (regionJobs.has(target)) {
+      await send(`Sabar ya kak 🙏 info buat *${humanWilayah(target)}* lagi aku cariin, sebentar lagi aku kabarin.`);
+    } else {
+      regionAttempts.set(target, Date.now());
+      await send(
+        `Oke, soal bansos di *${humanWilayah(target)}* aku belum punya datanya nih. ` +
+          `Bentar ya, aku cariin dari situs resmi pemerintah dulu… 🔎 nanti aku kabarin lagi.`,
+      );
+      discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }); // background, JANGAN di-await
     }
-    // Bukan info → jawab normal, tapi kirim `jenis` agar tak klasifikasi 2x.
-    const { reply } = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId, jenis });
-    if (reply) await send(reply);
     return;
   }
 
-  const { reply } = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });
-  if (reply) await send(reply);
+  if (result.reply) await send(result.reply);
 }
 
 /** Proses latar belakang: scrape daerah lewat web search, lalu kirim follow-up berisi hasilnya. */

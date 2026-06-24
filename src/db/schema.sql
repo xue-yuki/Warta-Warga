@@ -78,10 +78,13 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
 
 -- Log interaksi ANONIM — hanya untuk tren kebutuhan, tanpa identitas pribadi
 CREATE TABLE IF NOT EXISTS log_interaksi (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  konteks     TEXT,                          -- grup | japri
-  jenis       TEXT,                          -- info | klaim | lain
-  label       TEXT,                          -- klaim: verified | unverified | contradict
-  wilayah_tag TEXT,
-  timestamp   TEXT NOT NULL
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  konteks       TEXT,                          -- grup | japri
+  jenis         TEXT,                          -- = aksi brain: info|verifikasi|lapor|tanya_balik|ngobrol|tolak
+  aksi          TEXT,                          -- aksi brain (eksplisit; jenis dipertahankan utk kompat lama)
+  label         TEXT,                          -- verifikasi: bukan_penipuan | belum_pasti | jelas_penipuan
+  wilayah_tag   TEXT,
+  ringkas_pesan TEXT,                          -- ringkasan maksud warga (NO-PII) utk analytics
+  ringkas_resp  TEXT,                          -- ringkasan respons bot (NO-PII)
+  timestamp     TEXT NOT NULL
 );

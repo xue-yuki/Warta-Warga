@@ -20,6 +20,9 @@ export function getDb() {
   // Migrasi ringan untuk DB lama: tambah kolom yang belum ada (CREATE IF NOT EXISTS tak menambah kolom).
   ensureColumn(_db, 'info_bansos', 'batas_daftar', 'TEXT');
   ensureColumn(_db, 'kb_chunks', 'batas_daftar', 'TEXT');
+  ensureColumn(_db, 'log_interaksi', 'aksi', 'TEXT');
+  ensureColumn(_db, 'log_interaksi', 'ringkas_pesan', 'TEXT');
+  ensureColumn(_db, 'log_interaksi', 'ringkas_resp', 'TEXT');
   return _db;
 }
 
@@ -244,13 +247,22 @@ export function countChunks() {
 
 // ---------- log_interaksi (anonim) ----------
 
-export function logInteraksi({ konteks, jenis, label, wilayahTag }) {
+export function logInteraksi({ konteks, jenis, aksi = null, label, wilayahTag, ringkasPesan = null, ringkasResp = null }) {
   getDb()
     .prepare(
-      `INSERT INTO log_interaksi (konteks, jenis, label, wilayah_tag, timestamp)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO log_interaksi (konteks, jenis, aksi, label, wilayah_tag, ringkas_pesan, ringkas_resp, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(konteks || null, jenis || null, label || null, wilayahTag || null, new Date().toISOString());
+    .run(
+      konteks || null,
+      jenis || null,
+      aksi || jenis || null,
+      label || null,
+      wilayahTag || null,
+      ringkasPesan || null,
+      ringkasResp || null,
+      new Date().toISOString(),
+    );
 }
 
 export function resetKnowledge() {

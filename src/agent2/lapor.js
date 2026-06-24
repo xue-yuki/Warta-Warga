@@ -5,7 +5,7 @@
 import { chatJson } from '../llm/openrouter.js';
 import { hasLLM } from '../config.js';
 import { checkClaim } from './claim.js';
-import { detectWilayahFromText, normalizeWilayahTag, humanWilayah } from '../util/wilayah.js';
+import { detectWilayahFromText, normalizeWilayahTag, humanWilayah, isKabKota } from '../util/wilayah.js';
 import { insertLaporan, findClusterLaporan, bumpLaporanSerupa } from '../db/index.js';
 
 // Pola modus penipuan UMUM (bukan cuma bansos) → eskalasi ke "jelas_penipuan" walau tak
@@ -147,6 +147,48 @@ export async function prosesLaporan({ text, wilayahTag, scopeTags = null }) {
     laporan = { id, status, wilayah_tag: wilayahTag, modus_key: ringkas.modus_key, isi_ringkas: ringkas.isi_ringkas };
   }
   return { reply: ACK, laporan, status, clustered };
+}
+
+/**
+ * TOOL untuk brain agentic: catat laporan yang SUDAH dinilai LLM (ringkasan no-PII + wilayah + status
+ * + teks peringatan) ke pipeline lapor (cluster → simpan → antri approval). LLM yang menilai; fungsi ini
+ * cuma eksekusi efek + dedup/cluster. TIDAK broadcast (nunggu approval pengurus).
+ * @returns {{ok:boolean, alasan?:string, pesan?:string, status?:string, clustered?:boolean, wilayah?:string, jumlah_serupa?:number}}
+ */
+export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan, wilayahTagGrup = null }) {
+  // Wilayah: utamakan tag grup (sudah valid saat /start); japri → normalisasi input LLM, wajib kab/kota.
+  let wilayahTag = wilayahTagGrup && isKabKota(wilayahTagGrup) ? wilayahTagGrup : null;
+  if (!wilayahTag && wilayah_kabkota) {
+    const norm = normalizeWilayahTag(wilayah_kabkota);
+    if (isKabKota(norm)) wilayahTag = norm;
+  }
+  if (!wilayahTag) {
+    return { ok: false, alasan: 'wilayah_belum_spesifik', pesan: 'Wilayah belum spesifik kabupaten/kota. Tanya warga dulu kab/kota kejadiannya, jangan catat dulu.' };
+  }
+
+  const status = ['jelas_penipuan', 'belum_pasti', 'bukan_penipuan'].includes(tingkat_bahaya) ? tingkat_bahaya : 'belum_pasti';
+  const isiRingkas = String(ringkasan_modus || '').slice(0, 300) || 'Laporan modus penipuan dari warga.';
+  const modusKey = matchScamPattern(isiRingkas) || 'lainnya';
+
+  // Cluster hanya untuk modus SPESIFIK (modus + wilayah + status sama) — 'lainnya' jangan digabung.
+  const existing = modusKey !== 'lainnya' ? findClusterLaporan({ modusKey, wilayahTag, status }) : null;
+  let laporan;
+  let clustered = false;
+  if (existing) {
+    laporan = bumpLaporanSerupa(existing.id);
+    clustered = true;
+  } else {
+    const id = insertLaporan({
+      isiRingkas,
+      modusKey,
+      wilayahTag,
+      status,
+      dasarVerifikasi: 'Dilaporkan warga; dinilai asisten Warta Warga.',
+      teksPeringatan: String(teks_peringatan || '').trim() || FALLBACK_PERINGATAN,
+    });
+    laporan = { id, jumlah_serupa: 1 };
+  }
+  return { ok: true, status, clustered, wilayah: humanWilayah(wilayahTag), jumlah_serupa: laporan.jumlah_serupa || 1 };
 }
 
 // ---------- State percakapan lapor (efemeral, RAM, TANPA identitas) ----------

@@ -32,7 +32,7 @@ function needsContext(question) {
  * Mis. history menyebut BANPIN, lalu "itu syaratnya apa" → "syarat program BANPIN".
  * Tanpa LLM / tanpa history / pertanyaan sudah jelas → kembalikan apa adanya.
  */
-async function standaloneQuery(question, history) {
+export async function standaloneQuery(question, history) {
   if (!hasLLM() || !history?.length || !needsContext(question)) return question;
   try {
     const convo = history
@@ -127,7 +127,7 @@ function prettyChunk(content) {
 }
 
 /** Pastikan ada baris sumber + tanggal update info + peringatan masa berlaku di akhir jawaban. */
-function withMeta(text, sources, updated, notice = null) {
+export function withMeta(text, sources, updated, notice = null) {
   // Buang baris "(Info diperbarui ...)" bila LLM terlanjur meniru dari riwayat → cegah dobel.
   let out = text
     .split('\n')

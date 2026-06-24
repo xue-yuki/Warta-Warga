@@ -13,7 +13,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 429, 500, 502, 503, 504]);
 const MAX_RETRY = 3;
 
-export async function chat({ tier = 'fast', messages, json = false, temperature = 0.2, maxTokens = 1024 }) {
+// Kirim 1 request chat-completion (dengan retry transien) → kembalikan message LLM utuh.
+async function completion({ tier = 'fast', messages, json = false, tools = null, toolChoice = null, temperature = 0.2, maxTokens = 1024 }) {
   if (!hasLLM()) {
     throw new Error('OPENROUTER_API_KEY belum diset — LLM tidak tersedia.');
   }
@@ -24,6 +25,8 @@ export async function chat({ tier = 'fast', messages, json = false, temperature 
     temperature,
     max_tokens: maxTokens, // batasi agar muat di kredit & lebih murah
     ...(json ? { response_format: { type: 'json_object' } } : {}),
+    ...(tools ? { tools } : {}),
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
   });
 
   let lastErr;
@@ -52,7 +55,7 @@ export async function chat({ tier = 'fast', messages, json = false, temperature 
 
     if (res.ok) {
       const data = await res.json();
-      return data?.choices?.[0]?.message?.content ?? '';
+      return data?.choices?.[0]?.message ?? { content: '' };
     }
 
     const body = await res.text().catch(() => '');
@@ -68,6 +71,20 @@ export async function chat({ tier = 'fast', messages, json = false, temperature 
   throw lastErr;
 }
 
+/** Chat biasa → kembalikan konten teks. */
+export async function chat(opts) {
+  const msg = await completion(opts);
+  return msg?.content ?? '';
+}
+
+/**
+ * Chat dengan TOOLS (function calling) → kembalikan message LLM utuh ({content, tool_calls}).
+ * Pemanggil menjalankan tool lalu memanggil lagi dengan hasilnya (agentic loop).
+ */
+export async function chatWithTools({ tier = 'deep', messages, tools, toolChoice = 'auto', temperature = 0.3, maxTokens = 900 }) {
+  return completion({ tier, messages, tools, toolChoice, temperature, maxTokens });
+}
+
 /** Backoff eksponensial + jitter: ~0.8s, 2s, 4s. */
 function backoff(attempt) {
   return Math.round((0.8 * 2 ** attempt + Math.random() * 0.4) * 1000);
@@ -75,8 +92,8 @@ function backoff(attempt) {
 
 /** Panggil LLM dan parse JSON dengan toleran (mengupas code fence bila ada). */
 export async function chatJson(opts) {
-  const raw = await chat({ ...opts, json: true });
-  return parseJsonLoose(raw);
+  const msg = await completion({ ...opts, json: true });
+  return parseJsonLoose(msg?.content ?? '');
 }
 
 export function parseJsonLoose(raw) {
