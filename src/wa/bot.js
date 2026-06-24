@@ -6,10 +6,12 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   DisconnectReason,
   jidNormalizedUser,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
-import { config, hasSearch } from '../config.js';
+import { config, hasSearch, hasVision } from '../config.js';
 import { getGrup, upsertGrup, countInfoByWilayah } from '../db/index.js';
 import { respondToMessage, GREETING } from '../agent2/handler.js';
+import { describeImage } from '../agent2/vision.js';
 import {
   groupScopeTags,
   normalizeWilayahTag,
@@ -99,7 +101,12 @@ function userPart(jid) {
  */
 function isMentioned(msg, sock) {
   const m = unwrap(msg.message);
-  const ctx = m?.extendedTextMessage?.contextInfo || m?.contextInfo;
+  // Mention bisa ada di teks biasa ATAU di caption gambar/video.
+  const ctx =
+    m?.extendedTextMessage?.contextInfo ||
+    m?.imageMessage?.contextInfo ||
+    m?.videoMessage?.contextInfo ||
+    m?.contextInfo;
   if (!ctx) return false;
 
   const botNums = new Set([userPart(sock?.user?.id), userPart(sock?.user?.lid)].filter(Boolean));
@@ -223,16 +230,40 @@ async function handleOne(sock, msg, botJid) {
 
   // F2.1: bedakan grup vs japri dari JID.
   const isGroup = jid.endsWith('@g.us');
-  const text = extractText(msg);
-  if (!text) return;
-
   const send = (body) => sock.sendMessage(jid, { text: body });
+  let text = extractText(msg);
+
+  // Gambar (poster/screenshot/struk penipuan): baca jadi teks via vision lalu gabung dgn caption.
+  // Mahal → hanya saat bot memang akan merespons (japri, atau di grup ketika di-mention).
+  const img = unwrap(msg.message)?.imageMessage;
+  if (img) {
+    const willRespond = isGroup ? isMentioned(msg, sock) : true;
+    if (willRespond && hasVision()) {
+      await presence(sock, jid, 'composing');
+      const desc = await imageToText(sock, msg, img).catch((e) => {
+        console.warn('[vision] gagal:', e.message);
+        return null;
+      });
+      if (desc) text = [text, `[Isi gambar yang dikirim warga]\n${desc}`].filter(Boolean).join('\n\n');
+    } else if (willRespond && !hasVision() && !text) {
+      await send('Maaf, aku belum bisa membaca gambar 🙏 Tolong ketik isinya, atau kirim teks/link-nya ya.');
+      return;
+    }
+  }
+
+  if (!text) return;
 
   if (isGroup) {
     await handleGroup(sock, jid, msg, text, botJid, send);
   } else {
     await handleJapri(sock, jid, msg, text, send);
   }
+}
+
+/** Unduh media gambar lalu ubah jadi teks (OCR + deskripsi) via model vision. */
+async function imageToText(sock, msg, img) {
+  const buffer = await downloadMediaMessage(msg, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+  return describeImage(buffer, img.mimetype || 'image/jpeg', img.caption || '');
 }
 
 async function handleGroup(sock, jid, msg, text, botJid, send) {

@@ -68,6 +68,14 @@ export const config = {
     browserWss: process.env.BRIGHTDATA_BROWSER_WSS || '',
   },
 
+  // Vision (gambar→teks): model TEKS tetap DeepSeek; vision dipanggil terpisah saat ada gambar.
+  // Default endpoint OpenAI-compatible Google Gemini (free tier). Set VISION_API_KEY untuk mengaktifkan.
+  vision: {
+    apiKey: process.env.VISION_API_KEY || process.env.VISION_API || '',
+    baseUrl: process.env.VISION_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: process.env.VISION_MODEL || 'gemini-flash-lite-latest',
+  },
+
   wa: {
     authDir: abs(process.env.WA_AUTH_DIR || './auth_state'),
     botJid: process.env.BOT_JID || '',
@@ -77,6 +85,7 @@ export const config = {
 };
 
 export const hasLLM = () => Boolean(config.openrouter.apiKey);
+export const hasVision = () => Boolean(config.vision.apiKey);
 export const hasSearch = () => {
   const s = config.search;
   if (s.provider === 'serper') return Boolean(s.serperKey);
