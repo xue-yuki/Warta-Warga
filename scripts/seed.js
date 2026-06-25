@@ -3,13 +3,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, config } from '../src/config.js';
-import { getDb, resetKnowledge, countInfoBansos, countChunks } from '../src/db/index.js';
+import { initDb, resetKnowledge, countInfoBansos, countChunks } from '../src/db/index.js';
 import { storeStructured } from '../src/agent1/index.js';
 
 async function main() {
-  getDb();
+  await initDb();
   console.log(`🌱 Seeding KB (embeddings: ${config.embeddings.provider})...`);
-  resetKnowledge();
+  await resetKnowledge();
 
   const file = path.join(ROOT, 'data', 'synthetic', 'info_bansos.json');
   const items = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -22,7 +22,7 @@ async function main() {
   }
 
   console.log(`\n✅ Selesai. ${ok}/${items.length} info tersimpan.`);
-  console.log(`   Total: ${countInfoBansos()} info_bansos, ${countChunks()} chunk di vector store.`);
+  console.log(`   Total: ${await countInfoBansos()} info_bansos, ${await countChunks()} chunk di vector store.`);
   process.exit(0);
 }
 

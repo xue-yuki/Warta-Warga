@@ -10,7 +10,7 @@
     "tanggal_penting": "Disalurkan per tahap (umumnya 4 tahap dalam setahun)",
     "cara_daftar": "Daftar lewat usulan RT/RW ke desa/kelurahan agar masuk DTKS, atau usul mandiri via aplikasi Cek Bansos.",
     "wilayah_tag": "nasional",
-    "sumber_url": "https://kemensos.go.id/program-keluarga-harapan",
+    "sumber_url": "https://kemensos.go.id/program-keluarga-harapan-2",
     "tanggal_ambil": "2026-06-01"
   },
   {
@@ -39,34 +39,6 @@
     "wilayah_tag": "nasional",
     "sumber_url": "https://pip.kemdikbud.go.id/",
     "tanggal_ambil": "2026-06-01"
-  },
-  {
-    "program": "Bantuan Sosial Daerah Kabupaten Banyumas 2026",
-    "ringkasan": "Bantuan tambahan dari Pemkab Banyumas untuk warga rentan yang belum tercakup bansos pusat, berupa paket sembako dan bantuan tunai terbatas.",
-    "syarat": [
-      "KTP dan domisili Kabupaten Banyumas",
-      "Belum menerima PKH/BPNT pada periode berjalan",
-      "Direkomendasikan oleh RT/RW dan diverifikasi desa/kelurahan"
-    ],
-    "tanggal_penting": "Pendaftaran usulan dibuka tiap awal triwulan",
-    "cara_daftar": "Ajukan ke RT/RW setempat, lalu diverifikasi oleh Dinas Sosial Kabupaten Banyumas.",
-    "wilayah_tag": "kabupaten:banyumas",
-    "sumber_url": "https://dinsos.banyumaskab.go.id/bansos-daerah-2026",
-    "tanggal_ambil": "2026-06-05"
-  },
-  {
-    "program": "Bantuan Sosial Daerah Kabupaten Bogor 2026",
-    "ringkasan": "Bantuan dari Pemkab Bogor untuk warga rentan berupa paket sembako dan bantuan tunai terbatas bagi keluarga yang belum tercakup bansos pusat.",
-    "syarat": [
-      "KTP dan domisili Kabupaten Bogor",
-      "Belum menerima PKH/BPNT pada periode berjalan",
-      "Direkomendasikan oleh RT/RW dan diverifikasi Dinas Sosial Kabupaten Bogor"
-    ],
-    "tanggal_penting": "Pendaftaran usulan dibuka tiap awal triwulan",
-    "cara_daftar": "Ajukan ke RT/RW setempat, lalu diverifikasi oleh Dinas Sosial Kabupaten Bogor.",
-    "wilayah_tag": "kabupaten:bogor",
-    "sumber_url": "https://dinsos.bogorkab.go.id/bansos-daerah-2026",
-    "tanggal_ambil": "2026-06-10"
   },
   {
     "program": "Bantuan Iuran Jaminan Kesehatan (PBI-JKN)",

@@ -1,71 +1,125 @@
+// Lapisan persistensi Warta Warga — interface ASYNC dengan DUA backend:
+//   - SQLite (better-sqlite3) bila SUPABASE_DB_URL kosong → dev/offline & tes cepat.
+//   - Postgres (Supabase) bila SUPABASE_DB_URL diset → deploy.
+// Semua fungsi async (Postgres async); SQLite tetap sinkron di dalam, dibungkus async agar seragam.
+// Shape baris dijaga identik: id=number (SERIAL int4), timestamp=ISO string (TEXT), syarat/embedding=array.
+
 import Database from 'better-sqlite3';
+import postgres from 'postgres';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from '../config.js';
+import { config, hasSupabase } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-let _db = null;
+// ---------- Inisialisasi backend ----------
+let _sqlite = null;
+let _pg = null;
+let _pgReady = null;
 
-/** Ambil koneksi DB (singleton). Membuat file + skema bila belum ada. */
-export function getDb() {
-  if (_db) return _db;
+function sqliteDb() {
+  if (_sqlite) return _sqlite;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-  _db = new Database(config.dbPath);
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('foreign_keys = ON');
-  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  _db.exec(schema);
-  // Migrasi ringan untuk DB lama: tambah kolom yang belum ada (CREATE IF NOT EXISTS tak menambah kolom).
-  ensureColumn(_db, 'info_bansos', 'batas_daftar', 'TEXT');
-  ensureColumn(_db, 'kb_chunks', 'batas_daftar', 'TEXT');
-  ensureColumn(_db, 'log_interaksi', 'aksi', 'TEXT');
-  ensureColumn(_db, 'log_interaksi', 'ringkas_pesan', 'TEXT');
-  ensureColumn(_db, 'log_interaksi', 'ringkas_resp', 'TEXT');
-  return _db;
+  _sqlite = new Database(config.dbPath);
+  _sqlite.pragma('journal_mode = WAL');
+  _sqlite.pragma('foreign_keys = ON');
+  _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  ensureColumn(_sqlite, 'info_bansos', 'batas_daftar', 'TEXT');
+  ensureColumn(_sqlite, 'kb_chunks', 'batas_daftar', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_pesan', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_resp', 'TEXT');
+  return _sqlite;
 }
 
-/** Tambah kolom bila belum ada (idempoten) — untuk migrasi skema tanpa kehilangan data. */
 function ensureColumn(db, table, col, type) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
   if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 }
 
+async function pgInit() {
+  // prepare:false → aman untuk Supabase pooler (transaction mode tak dukung prepared statement).
+  _pg = postgres(config.supabase.dbUrl, { ssl: 'require', prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} });
+  const ddl = fs.readFileSync(path.join(__dirname, 'schema.pg.sql'), 'utf8');
+  await _pg.unsafe(ddl); // idempoten (CREATE IF NOT EXISTS)
+  return _pg;
+}
+
+/** Pastikan backend siap. Untuk Postgres: konek + jalankan skema idempoten (sekali). */
+export async function initDb() {
+  if (!hasSupabase()) {
+    sqliteDb();
+    return;
+  }
+  if (!_pgReady) _pgReady = pgInit();
+  await _pgReady;
+}
+
+/** Akses langsung SQLite (hanya backend SQLite — untuk script admin raw-SQL). */
+export function getDb() {
+  return sqliteDb();
+}
+
+// Helper SQLite: jalankan callback sinkron dengan db.
+const sq = () => sqliteDb();
+
 // ---------- Grup ----------
 
-export function getGrup(idGrup) {
-  return getDb().prepare('SELECT * FROM grup WHERE id_grup = ?').get(idGrup);
+export async function getGrup(idGrup) {
+  await initDb();
+  if (hasSupabase()) {
+    const r = await _pg`SELECT * FROM grup WHERE id_grup = ${idGrup}`;
+    return r[0] || null;
+  }
+  return sq().prepare('SELECT * FROM grup WHERE id_grup = ?').get(idGrup) || null;
 }
 
-/** Semua grup yang sudah /start (status_start=1) — target broadcast. */
-export function listActiveGrups() {
-  return getDb().prepare('SELECT * FROM grup WHERE status_start = 1').all();
+export async function listActiveGrups() {
+  await initDb();
+  if (hasSupabase()) return [...(await _pg`SELECT * FROM grup WHERE status_start = 1`)];
+  return sq().prepare('SELECT * FROM grup WHERE status_start = 1').all();
 }
 
-export function upsertGrup({ idGrup, daerah, wilayahTag, provinsiTag }) {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO grup (id_grup, daerah, wilayah_tag, provinsi_tag, status_start, tgl_start)
-     VALUES (@idGrup, @daerah, @wilayahTag, @provinsiTag, 1, @ts)
-     ON CONFLICT(id_grup) DO UPDATE SET
-       daerah = excluded.daerah,
-       wilayah_tag = excluded.wilayah_tag,
-       provinsi_tag = excluded.provinsi_tag,
-       status_start = 1,
-       tgl_start = excluded.tgl_start`,
-  ).run({ idGrup, daerah, wilayahTag, provinsiTag: provinsiTag || null, ts: new Date().toISOString() });
+export async function upsertGrup({ idGrup, daerah, wilayahTag, provinsiTag }) {
+  await initDb();
+  const ts = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO grup (id_grup, daerah, wilayah_tag, provinsi_tag, status_start, tgl_start)
+      VALUES (${idGrup}, ${daerah}, ${wilayahTag}, ${provinsiTag || null}, 1, ${ts})
+      ON CONFLICT (id_grup) DO UPDATE SET
+        daerah = EXCLUDED.daerah, wilayah_tag = EXCLUDED.wilayah_tag,
+        provinsi_tag = EXCLUDED.provinsi_tag, status_start = 1, tgl_start = EXCLUDED.tgl_start`;
+    return getGrup(idGrup);
+  }
+  sq()
+    .prepare(
+      `INSERT INTO grup (id_grup, daerah, wilayah_tag, provinsi_tag, status_start, tgl_start)
+       VALUES (@idGrup, @daerah, @wilayahTag, @provinsiTag, 1, @ts)
+       ON CONFLICT(id_grup) DO UPDATE SET
+         daerah = excluded.daerah, wilayah_tag = excluded.wilayah_tag,
+         provinsi_tag = excluded.provinsi_tag, status_start = 1, tgl_start = excluded.tgl_start`,
+    )
+    .run({ idGrup, daerah, wilayahTag, provinsiTag: provinsiTag || null, ts });
   return getGrup(idGrup);
 }
 
 // ---------- info_bansos ----------
 
-export function insertInfoBansos(info) {
-  const db = getDb();
-  const res = db
+export async function insertInfoBansos(info) {
+  await initDb();
+  if (hasSupabase()) {
+    const [row] = await _pg`
+      INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
+      VALUES (${info.program}, ${info.ringkasan}, ${_pg.json(info.syarat || [])}, ${info.tanggal_penting || null},
+              ${info.batas_daftar || null}, ${info.cara_daftar || null}, ${info.wilayah_tag}, ${info.sumber_url}, ${info.tanggal_ambil})
+      RETURNING id`;
+    return row.id;
+  }
+  return sq()
     .prepare(
-      `INSERT INTO info_bansos
-        (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
+      `INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
        VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil)`,
     )
     .run({
@@ -78,166 +132,236 @@ export function insertInfoBansos(info) {
       wilayah_tag: info.wilayah_tag,
       sumber_url: info.sumber_url,
       tanggal_ambil: info.tanggal_ambil,
-    });
-  return res.lastInsertRowid;
+    }).lastInsertRowid;
 }
 
-export function countInfoBansos() {
-  return getDb().prepare('SELECT COUNT(*) AS n FROM info_bansos').get().n;
+export async function countInfoBansos() {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT COUNT(*)::int AS n FROM info_bansos`)[0].n;
+  return sq().prepare('SELECT COUNT(*) AS n FROM info_bansos').get().n;
 }
 
-/** Berapa entri info untuk wilayah tertentu (untuk cek apakah daerah sudah tercakup). */
-export function countInfoByWilayah(wilayahTag) {
-  return getDb().prepare('SELECT COUNT(*) AS n FROM info_bansos WHERE wilayah_tag = ?').get(wilayahTag).n;
+export async function countInfoByWilayah(wilayahTag) {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT COUNT(*)::int AS n FROM info_bansos WHERE wilayah_tag = ${wilayahTag}`)[0].n;
+  return sq().prepare('SELECT COUNT(*) AS n FROM info_bansos WHERE wilayah_tag = ?').get(wilayahTag).n;
 }
 
-/**
- * Hapus info (+chunk via cascade) dari satu sumber_url.
- * Dipakai auto-scrape agar re-scrape me-REFRESH, bukan menumpuk duplikat.
- * @returns {number} jumlah baris info_bansos yang dihapus
- */
-export function deleteInfoBySource(sumberUrl) {
-  const db = getDb();
-  // kb_chunks tidak selalu ter-cascade (info_id lama) → bersihkan eksplisit by sumber_url juga.
-  db.prepare('DELETE FROM kb_chunks WHERE sumber_url = ?').run(sumberUrl);
-  return db.prepare('DELETE FROM info_bansos WHERE sumber_url = ?').run(sumberUrl).changes;
+/** Hapus info (+chunk) dari satu sumber_url. @returns {number} baris info_bansos terhapus */
+export async function deleteInfoBySource(sumberUrl) {
+  await initDb();
+  if (hasSupabase()) {
+    await _pg`DELETE FROM kb_chunks WHERE sumber_url = ${sumberUrl}`;
+    const r = await _pg`DELETE FROM info_bansos WHERE sumber_url = ${sumberUrl}`;
+    return r.count;
+  }
+  sq().prepare('DELETE FROM kb_chunks WHERE sumber_url = ?').run(sumberUrl);
+  return sq().prepare('DELETE FROM info_bansos WHERE sumber_url = ?').run(sumberUrl).changes;
 }
 
-// ---------- broadcast_log (dedup siaran) ----------
-
-/** Apakah info dengan fingerprint ini sudah pernah di-broadcast? */
-export function wasBroadcast(fingerprint) {
-  return Boolean(getDb().prepare('SELECT 1 FROM broadcast_log WHERE fingerprint = ?').get(fingerprint));
+export async function resetKnowledge() {
+  await initDb();
+  if (hasSupabase()) {
+    await _pg`DELETE FROM kb_chunks`;
+    await _pg`DELETE FROM info_bansos`;
+    return;
+  }
+  sq().exec('DELETE FROM kb_chunks; DELETE FROM info_bansos;');
 }
 
-/** Catat bahwa sebuah info sudah di-broadcast (idempoten via PK fingerprint). */
-export function markBroadcast({ fingerprint, program, wilayahTag, grupCount }) {
-  getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO broadcast_log (fingerprint, program, wilayah_tag, grup_count, ts)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(fingerprint, program || null, wilayahTag || null, grupCount ?? 0, new Date().toISOString());
+// ---------- broadcast_log ----------
+
+export async function wasBroadcast(fingerprint) {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT 1 FROM broadcast_log WHERE fingerprint = ${fingerprint}`).length > 0;
+  return Boolean(sq().prepare('SELECT 1 FROM broadcast_log WHERE fingerprint = ?').get(fingerprint));
 }
 
-// ---------- laporan (Lapor & Peringatan Dini) ----------
+export async function markBroadcast({ fingerprint, program, wilayahTag, grupCount }) {
+  await initDb();
+  const ts = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO broadcast_log (fingerprint, program, wilayah_tag, grup_count, ts)
+      VALUES (${fingerprint}, ${program || null}, ${wilayahTag || null}, ${grupCount ?? 0}, ${ts})
+      ON CONFLICT (fingerprint) DO NOTHING`;
+    return;
+  }
+  sq()
+    .prepare(`INSERT OR IGNORE INTO broadcast_log (fingerprint, program, wilayah_tag, grup_count, ts) VALUES (?, ?, ?, ?, ?)`)
+    .run(fingerprint, program || null, wilayahTag || null, grupCount ?? 0, ts);
+}
 
-/** Simpan laporan baru (TANPA identitas pelapor). @returns {number} id */
-export function insertLaporan({ isiRingkas, modusKey, wilayahTag, status, dasarVerifikasi, teksPeringatan }) {
+// ---------- laporan ----------
+
+export async function insertLaporan({ isiRingkas, modusKey, wilayahTag, status, dasarVerifikasi, teksPeringatan }) {
+  await initDb();
   const now = new Date().toISOString();
-  const res = getDb()
+  if (hasSupabase()) {
+    const [row] = await _pg`
+      INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, teks_peringatan, timestamp, updated_ts)
+      VALUES (${isiRingkas}, ${modusKey || null}, ${wilayahTag}, ${status}, ${dasarVerifikasi || null}, ${teksPeringatan || null}, ${now}, ${now})
+      RETURNING id`;
+    return row.id;
+  }
+  return sq()
     .prepare(
       `INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, teks_peringatan, timestamp, updated_ts)
        VALUES (@isi, @modus, @wilayah, @status, @dasar, @teks, @ts, @ts)`,
     )
-    .run({
-      isi: isiRingkas,
-      modus: modusKey || null,
-      wilayah: wilayahTag,
-      status,
-      dasar: dasarVerifikasi || null,
-      teks: teksPeringatan || null,
-      ts: now,
-    });
-  return res.lastInsertRowid;
+    .run({ isi: isiRingkas, modus: modusKey || null, wilayah: wilayahTag, status, dasar: dasarVerifikasi || null, teks: teksPeringatan || null, ts: now })
+    .lastInsertRowid;
 }
 
-/** Cari laporan PENDING sejenis (modus + wilayah + STATUS sama) untuk clustering (L5). */
-export function findClusterLaporan({ modusKey, wilayahTag, status }) {
+export async function findClusterLaporan({ modusKey, wilayahTag, status }) {
+  await initDb();
   if (!modusKey) return null;
-  return getDb()
-    .prepare(
-      `SELECT * FROM laporan
-       WHERE modus_key = ? AND wilayah_tag = ? AND status = ? AND status_approval = 'menunggu'
-       ORDER BY id DESC LIMIT 1`,
-    )
-    .get(modusKey, wilayahTag, status);
+  if (hasSupabase()) {
+    const r = await _pg`
+      SELECT * FROM laporan
+      WHERE modus_key = ${modusKey} AND wilayah_tag = ${wilayahTag} AND status = ${status} AND status_approval = 'menunggu'
+      ORDER BY id DESC LIMIT 1`;
+    return r[0] || null;
+  }
+  return (
+    sq()
+      .prepare(
+        `SELECT * FROM laporan WHERE modus_key = ? AND wilayah_tag = ? AND status = ? AND status_approval = 'menunggu' ORDER BY id DESC LIMIT 1`,
+      )
+      .get(modusKey, wilayahTag, status) || null
+  );
 }
 
-/** Tambah counter laporan serupa (clustering, bukan baris baru). */
-export function bumpLaporanSerupa(id) {
-  getDb()
-    .prepare(`UPDATE laporan SET jumlah_serupa = jumlah_serupa + 1, updated_ts = ? WHERE id = ?`)
-    .run(new Date().toISOString(), id);
+export async function bumpLaporanSerupa(id) {
+  await initDb();
+  const now = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`UPDATE laporan SET jumlah_serupa = jumlah_serupa + 1, updated_ts = ${now} WHERE id = ${id}`;
+  } else {
+    sq().prepare(`UPDATE laporan SET jumlah_serupa = jumlah_serupa + 1, updated_ts = ? WHERE id = ?`).run(now, id);
+  }
   return getLaporan(id);
 }
 
-export function getLaporan(id) {
-  return getDb().prepare('SELECT * FROM laporan WHERE id = ?').get(id);
+export async function getLaporan(id) {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT * FROM laporan WHERE id = ${id}`)[0] || null;
+  return sq().prepare('SELECT * FROM laporan WHERE id = ?').get(id) || null;
 }
 
-/**
- * Agregat modus penipuan yang lagi marak dari laporan warga (untuk digest "waspada nasional").
- * Hanya hitung yang berstatus penipuan/belum pasti (bukan_penipuan dikecualikan). Grounded di data
- * laporan asli — bukan scraping. Bisa difilter per wilayah; default nasional (semua wilayah).
- * @returns {Array<{modus_key:string, total:number, klaster:number}>}
- */
-export function trendingModus({ days = 30, limit = 5, wilayahTag = null } = {}) {
+/** Agregat modus penipuan yang lagi marak (digest "waspada nasional"). */
+export async function trendingModus({ days = 30, limit = 5, wilayahTag = null } = {}) {
+  await initDb();
   const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  if (hasSupabase()) {
+    return [
+      ...(await _pg`
+        SELECT modus_key, SUM(jumlah_serupa)::int AS total, COUNT(*)::int AS klaster
+        FROM laporan
+        WHERE timestamp >= ${cutoff} AND status IN ('jelas_penipuan','belum_pasti')
+        ${wilayahTag ? _pg`AND wilayah_tag = ${wilayahTag}` : _pg``}
+        GROUP BY modus_key ORDER BY total DESC, klaster DESC LIMIT ${limit}`),
+    ];
+  }
   const params = [cutoff];
   let sql = `SELECT modus_key, SUM(jumlah_serupa) AS total, COUNT(*) AS klaster
-             FROM laporan
-             WHERE timestamp >= ? AND status IN ('jelas_penipuan','belum_pasti')`;
+             FROM laporan WHERE timestamp >= ? AND status IN ('jelas_penipuan','belum_pasti')`;
   if (wilayahTag) {
     sql += ' AND wilayah_tag = ?';
     params.push(wilayahTag);
   }
   sql += ' GROUP BY modus_key ORDER BY total DESC, klaster DESC LIMIT ?';
   params.push(limit);
-  return getDb().prepare(sql).all(...params);
+  return sq().prepare(sql).all(...params);
 }
 
-/** Antrian approval: jelas_penipuan yang masih menunggu (L4). Prioritas: terbanyak dulu. */
-export function listAntrianApproval() {
-  return getDb()
-    .prepare(
-      `SELECT * FROM laporan
-       WHERE status = 'jelas_penipuan' AND status_approval = 'menunggu'
-       ORDER BY jumlah_serupa DESC, id DESC`,
-    )
+export async function listAntrianApproval() {
+  await initDb();
+  if (hasSupabase())
+    return [...(await _pg`SELECT * FROM laporan WHERE status = 'jelas_penipuan' AND status_approval = 'menunggu' ORDER BY jumlah_serupa DESC, id DESC`)];
+  return sq()
+    .prepare(`SELECT * FROM laporan WHERE status = 'jelas_penipuan' AND status_approval = 'menunggu' ORDER BY jumlah_serupa DESC, id DESC`)
     .all();
 }
 
-/** L5: laporan belum_pasti yang menumpuk (≥ minSerupa) → ikut diangkat untuk ditinjau. */
-export function listPrioritasBelumPasti(minSerupa = 3) {
-  return getDb()
-    .prepare(
-      `SELECT * FROM laporan
-       WHERE status = 'belum_pasti' AND status_approval = 'menunggu' AND jumlah_serupa >= ?
-       ORDER BY jumlah_serupa DESC, id DESC`,
-    )
+export async function listPrioritasBelumPasti(minSerupa = 3) {
+  await initDb();
+  if (hasSupabase())
+    return [
+      ...(await _pg`SELECT * FROM laporan WHERE status = 'belum_pasti' AND status_approval = 'menunggu' AND jumlah_serupa >= ${minSerupa} ORDER BY jumlah_serupa DESC, id DESC`),
+    ];
+  return sq()
+    .prepare(`SELECT * FROM laporan WHERE status = 'belum_pasti' AND status_approval = 'menunggu' AND jumlah_serupa >= ? ORDER BY jumlah_serupa DESC, id DESC`)
     .all(minSerupa);
 }
 
-/** Pengurus approve/tolak (Lapis 2 — human-in-the-loop). teksPeringatan opsional (edit sebelum sebar). */
-export function setApprovalLaporan(id, statusApproval, teksPeringatan) {
+export async function setApprovalLaporan(id, statusApproval, teksPeringatan) {
+  await initDb();
   const now = new Date().toISOString();
+  if (hasSupabase()) {
+    if (teksPeringatan != null) {
+      await _pg`UPDATE laporan SET status_approval = ${statusApproval}, teks_peringatan = ${teksPeringatan}, updated_ts = ${now} WHERE id = ${id}`;
+    } else {
+      await _pg`UPDATE laporan SET status_approval = ${statusApproval}, updated_ts = ${now} WHERE id = ${id}`;
+    }
+    return getLaporan(id);
+  }
   if (teksPeringatan != null) {
-    getDb().prepare(`UPDATE laporan SET status_approval = ?, teks_peringatan = ?, updated_ts = ? WHERE id = ?`)
-      .run(statusApproval, teksPeringatan, now, id);
+    sq().prepare(`UPDATE laporan SET status_approval = ?, teks_peringatan = ?, updated_ts = ? WHERE id = ?`).run(statusApproval, teksPeringatan, now, id);
   } else {
-    getDb().prepare(`UPDATE laporan SET status_approval = ?, updated_ts = ? WHERE id = ?`)
-      .run(statusApproval, now, id);
+    sq().prepare(`UPDATE laporan SET status_approval = ?, updated_ts = ? WHERE id = ?`).run(statusApproval, now, id);
   }
   return getLaporan(id);
 }
 
-// ---------- peringatan_terkirim (dedup siaran peringatan) ----------
+// ---------- peringatan_terkirim ----------
 
-export function wasPeringatanSent(laporanId) {
-  return Boolean(getDb().prepare('SELECT 1 FROM peringatan_terkirim WHERE laporan_id = ?').get(laporanId));
+export async function wasPeringatanSent(laporanId) {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT 1 FROM peringatan_terkirim WHERE laporan_id = ${laporanId}`).length > 0;
+  return Boolean(sq().prepare('SELECT 1 FROM peringatan_terkirim WHERE laporan_id = ?').get(laporanId));
 }
 
-export function markPeringatanTerkirim({ laporanId, wilayahTag, grupCount }) {
-  getDb()
-    .prepare(`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (?, ?, ?, ?)`)
-    .run(laporanId, wilayahTag || null, grupCount ?? 0, new Date().toISOString());
+export async function markPeringatanTerkirim({ laporanId, wilayahTag, grupCount }) {
+  await initDb();
+  const ts = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (${laporanId}, ${wilayahTag || null}, ${grupCount ?? 0}, ${ts})`;
+    return;
+  }
+  sq().prepare(`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (?, ?, ?, ?)`).run(laporanId, wilayahTag || null, grupCount ?? 0, ts);
+}
+
+// ---------- log_interaksi ----------
+
+export async function logInteraksi({ konteks, jenis, aksi = null, label, wilayahTag, ringkasPesan = null, ringkasResp = null }) {
+  await initDb();
+  const ts = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO log_interaksi (konteks, jenis, aksi, label, wilayah_tag, ringkas_pesan, ringkas_resp, timestamp)
+      VALUES (${konteks || null}, ${jenis || null}, ${aksi || jenis || null}, ${label || null}, ${wilayahTag || null}, ${ringkasPesan || null}, ${ringkasResp || null}, ${ts})`;
+    return;
+  }
+  sq()
+    .prepare(
+      `INSERT INTO log_interaksi (konteks, jenis, aksi, label, wilayah_tag, ringkas_pesan, ringkas_resp, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(konteks || null, jenis || null, aksi || jenis || null, label || null, wilayahTag || null, ringkasPesan || null, ringkasResp || null, ts);
 }
 
 // ---------- kb_chunks (vector store) ----------
 
-export function insertChunk(c) {
-  getDb()
+export async function insertChunk(c) {
+  await initDb();
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO kb_chunks (info_id, program, content, embedding, dim, sumber_url, wilayah_tag, tanggal_ambil, batas_daftar)
+      VALUES (${c.info_id}, ${c.program}, ${c.content}, ${_pg.json(c.embedding)}, ${c.embedding.length}, ${c.sumber_url}, ${c.wilayah_tag}, ${c.tanggal_ambil}, ${c.batas_daftar || null})`;
+    return;
+  }
+  sq()
     .prepare(
       `INSERT INTO kb_chunks (info_id, program, content, embedding, dim, sumber_url, wilayah_tag, tanggal_ambil, batas_daftar)
        VALUES (@info_id, @program, @content, @embedding, @dim, @sumber_url, @wilayah_tag, @tanggal_ambil, @batas_daftar)`,
@@ -255,38 +379,15 @@ export function insertChunk(c) {
     });
 }
 
-export function allChunks() {
-  return getDb()
-    .prepare('SELECT * FROM kb_chunks')
-    .all()
-    .map((r) => ({ ...r, embedding: JSON.parse(r.embedding) }));
+export async function allChunks() {
+  await initDb();
+  const rows = hasSupabase() ? [...(await _pg`SELECT * FROM kb_chunks`)] : sq().prepare('SELECT * FROM kb_chunks').all();
+  // embedding: Postgres JSONB → sudah array; SQLite TEXT → perlu parse.
+  return rows.map((r) => ({ ...r, embedding: typeof r.embedding === 'string' ? JSON.parse(r.embedding) : r.embedding }));
 }
 
-export function countChunks() {
-  return getDb().prepare('SELECT COUNT(*) AS n FROM kb_chunks').get().n;
-}
-
-// ---------- log_interaksi (anonim) ----------
-
-export function logInteraksi({ konteks, jenis, aksi = null, label, wilayahTag, ringkasPesan = null, ringkasResp = null }) {
-  getDb()
-    .prepare(
-      `INSERT INTO log_interaksi (konteks, jenis, aksi, label, wilayah_tag, ringkas_pesan, ringkas_resp, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      konteks || null,
-      jenis || null,
-      aksi || jenis || null,
-      label || null,
-      wilayahTag || null,
-      ringkasPesan || null,
-      ringkasResp || null,
-      new Date().toISOString(),
-    );
-}
-
-export function resetKnowledge() {
-  const db = getDb();
-  db.exec('DELETE FROM kb_chunks; DELETE FROM info_bansos;');
+export async function countChunks() {
+  await initDb();
+  if (hasSupabase()) return (await _pg`SELECT COUNT(*)::int AS n FROM kb_chunks`)[0].n;
+  return sq().prepare('SELECT COUNT(*) AS n FROM kb_chunks').get().n;
 }

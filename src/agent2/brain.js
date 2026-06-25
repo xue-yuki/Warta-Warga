@@ -246,7 +246,7 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
         } else if (tc.function?.name === 'tren_penipuan') {
           if (aksi !== 'lapor') aksi = 'info';
           const wt = args.wilayah ? normalizeWilayahTag(args.wilayah) : wilayahTag;
-          const rows = trendingModus({ days: 30, limit: 5, wilayahTag: isKabKota(wt) ? wt : null });
+          const rows = await trendingModus({ days: 30, limit: 5, wilayahTag: isKabKota(wt) ? wt : null });
           result = rows.length
             ? JSON.stringify({
                 cakupan: isKabKota(wt) ? humanWilayah(wt) : 'Nasional',
@@ -263,7 +263,7 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           result = JSON.stringify(r);
         } else if (tc.function?.name === 'catat_laporan') {
           aksi = 'lapor';
-          result = JSON.stringify(simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags }));
+          result = JSON.stringify(await simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags }));
         } else {
           result = 'Tool tidak dikenal.';
         }

@@ -1,7 +1,7 @@
 // CLI Agent 1 (on-demand). Contoh:
 //   node src/ingest.js url https://kemensos.go.id/xxx --wilayah kabupaten:banyumas
 //   node src/ingest.js file ./data/synthetic/contoh.txt --url https://dinsos.banyumaskab.go.id/x --wilayah kabupaten:banyumas
-import { getDb } from './db/index.js';
+import { initDb } from './db/index.js';
 import { ingestUrl, ingestLocalDoc } from './agent1/index.js';
 import { hasLLM } from './config.js';
 
@@ -16,7 +16,7 @@ function parseFlags(args) {
 
 async function main() {
   const [cmd, target, ...rest] = process.argv.slice(2);
-  getDb();
+  await initDb();
 
   if (!hasLLM()) {
     console.error('❌ Agent 1 (strukturisasi) butuh OPENROUTER_API_KEY. Untuk demo tanpa LLM, pakai `npm run seed`.');

@@ -16,7 +16,7 @@ async function ask({ text, konteks, scopeTags, label }) {
 
 async function main() {
   getDb();
-  if (countChunks() === 0) {
+  if ((await countChunks()) === 0) {
     console.error('KB kosong. Jalankan dulu: npm run seed');
     process.exit(1);
   }

@@ -281,7 +281,7 @@ async function handleGroup(sock, jid, msg, text, botJid, send) {
       }
       const wilayahTag = normalizeWilayahTag(arg);
       const provinsiTag = inferProvinsiTag(wilayahTag);
-      upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
+      await upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
       await send(
         `✅ Grup terdaftar untuk wilayah *${arg}* (tag: ${wilayahTag}${provinsiTag ? `, ${provinsiTag}` : ''}).\n` +
           `Mention saya (@) untuk tanya info atau cek kabar bansos. Saya hanya merespons saat di-mention di grup.`,
@@ -305,7 +305,7 @@ async function handleGroup(sock, jid, msg, text, botJid, send) {
   await presence(sock, jid, 'composing');
   try {
     const cleanText = text.replace(/@\d+/g, '').trim();
-    const grup = getGrup(jid);
+    const grup = await getGrup(jid);
     const scopeTags = grup ? groupScopeTags(grup) : [config.defaultWilayahTag];
     // Riwayat chat per-ORANG di dalam grup (bukan per-grup) → konteks follow-up tak kecampur antar warga.
     const sender = userPart(msg.key.participant || msg.participant || jid);
@@ -329,7 +329,7 @@ async function handleGroup(sock, jid, msg, text, botJid, send) {
 async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, justGreeted, send, sessionId }) {
   // Daerah spesifik yang disebut user (atau wilayah grup) yang belum punya data lokal.
   const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
-  const uncovered = target && isKabKota(target) && countInfoByWilayah(target) === 0;
+  const uncovered = target && isKabKota(target) && (await countInfoByWilayah(target)) === 0;
 
   // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
   // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
@@ -371,7 +371,7 @@ async function discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target
       sessionId,
     });
 
-    const found = countInfoByWilayah(target) > 0;
+    const found = (await countInfoByWilayah(target)) > 0;
     let out;
     if (found && grounded) {
       out = `Udah ketemu nih buat *${humanWilayah(target)}* 🙌\n\n${reply}`;

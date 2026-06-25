@@ -90,8 +90,8 @@ function safeParseArray(v) {
 }
 
 /** Grup terdaftar (opt-in) yang relevan untuk sebuah wilayah_tag (filter hierarkis §6.3). */
-export function grupsForWilayah(wilayahTag) {
-  return listActiveGrups().filter((g) => infoMatchesScope(wilayahTag, groupScopeTags(g)));
+export async function grupsForWilayah(wilayahTag) {
+  return (await listActiveGrups()).filter((g) => infoMatchesScope(wilayahTag, groupScopeTags(g)));
 }
 
 /** Grup terdaftar yang relevan untuk info ini (filter hierarkis §6.3). */
@@ -129,9 +129,9 @@ export async function broadcastNewInfos(records) {
   let sent = 0;
   for (const rec of list) {
     const fp = fingerprintInfo(rec);
-    if (wasBroadcast(fp)) continue; // sudah pernah disebar → jangan ulang
+    if (await wasBroadcast(fp)) continue; // sudah pernah disebar → jangan ulang
 
-    const targets = targetGrups(rec);
+    const targets = await targetGrups(rec);
     if (targets.length === 0) continue; // belum ada grup cocok → JANGAN tandai, biar dapat saat grup join nanti
 
     const text = formatBroadcast(rec);
@@ -151,7 +151,7 @@ export async function broadcastNewInfos(records) {
 
     if (okGrup > 0) {
       // Tandai terkirim HANYA bila minimal 1 grup berhasil → kegagalan total bisa dicoba lagi nanti.
-      markBroadcast({ fingerprint: fp, program: rec.program, wilayahTag: rec.wilayah_tag, grupCount: okGrup });
+      await markBroadcast({ fingerprint: fp, program: rec.program, wilayahTag: rec.wilayah_tag, grupCount: okGrup });
       infos++;
       console.log(`[Broadcast] 📢 "${rec.program}" (${rec.wilayah_tag}) → ${okGrup} grup.`);
     }
@@ -234,7 +234,7 @@ export function formatTrenDigest(items, { scope = 'Nasional', days = 30 } = {}) 
 export async function broadcastTrenNasional(items, opts = {}) {
   if (!_sender) return { sent: 0, reason: 'no-sender' };
   if (!items?.length) return { sent: 0, reason: 'tak-ada-data' };
-  const targets = listActiveGrups();
+  const targets = await listActiveGrups();
   if (!targets.length) return { sent: 0, reason: 'tak-ada-grup' };
   const okGrup = await sendToGrups(targets, formatTrenDigest(items, opts));
   if (okGrup > 0) console.log(`[Tren] 📊 digest "lagi marak" → ${okGrup} grup.`);
@@ -246,15 +246,15 @@ export async function broadcastPeringatan(laporan) {
   if (!laporan || laporan.status_approval !== 'disetujui') {
     return { sent: 0, grupCount: 0, reason: 'belum-disetujui' }; // Lapis 2: wajib approval manusia
   }
-  if (wasPeringatanSent(laporan.id)) return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
+  if (await wasPeringatanSent(laporan.id)) return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
 
-  const targets = grupsForWilayah(laporan.wilayah_tag);
+  const targets = await grupsForWilayah(laporan.wilayah_tag);
   if (targets.length === 0) return { sent: 0, grupCount: 0, reason: 'tak-ada-grup' };
 
   const text = formatPeringatan(laporan);
   const okGrup = await sendToGrups(targets, text);
   if (okGrup > 0) {
-    markPeringatanTerkirim({ laporanId: laporan.id, wilayahTag: laporan.wilayah_tag, grupCount: okGrup });
+    await markPeringatanTerkirim({ laporanId: laporan.id, wilayahTag: laporan.wilayah_tag, grupCount: okGrup });
     console.log(`[Peringatan] ⚠️ laporan #${laporan.id} (${laporan.wilayah_tag}) → ${okGrup} grup.`);
   }
   return { sent: okGrup, grupCount: okGrup };

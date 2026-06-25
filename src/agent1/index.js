@@ -34,7 +34,7 @@ async function finalizeFromText(text, { sumberUrl, hintWilayah, refresh = false 
     return { ok: false, url: sumberUrl, error: structured.error };
   }
   // refresh: hapus versi lama dari sumber yang sama supaya re-scrape tidak menumpuk duplikat.
-  if (refresh) deleteInfoBySource(sumberUrl);
+  if (refresh) await deleteInfoBySource(sumberUrl);
   return storeStructured({ ...structured.data, sumber_url: sumberUrl, hintWilayah });
 }
 
@@ -58,7 +58,7 @@ export async function storeStructured(info) {
   if (!record.sumber_url) return { ok: false, error: 'sumber_url wajib (F1.2).' };
   if (!record.program || !record.ringkasan) return { ok: false, error: 'program & ringkasan wajib.' };
 
-  const id = insertInfoBansos(record);
+  const id = await insertInfoBansos(record);
   const nChunks = await indexInfo(id, record);
   console.log(`[Agent1] OK  ${record.program} (${record.wilayah_tag}) → id=${id}, ${nChunks} chunk`);
   // `record` dikembalikan utuh agar pemanggil (scheduler) bisa broadcast info baru ke grup.

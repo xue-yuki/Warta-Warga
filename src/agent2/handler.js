@@ -41,7 +41,7 @@ export async function respondToMessage({ text, konteks, scopeTags = null, wilaya
   // LAPIS 1+2 (security, deterministik pra-LLM): tangkal prompt-injection & tugas off-topic.
   // Ini SARINGAN KEAMANAN, bukan klasifikasi maksud — jawaban tetap/hardcoded agar tak bisa "dibujuk".
   if (isInjection(text) || isOffTopicTask(text)) {
-    logInteraksi({ konteks, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', wilayahTag });
+    await logInteraksi({ konteks, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', wilayahTag });
     return { reply: REFUSAL_REPLY, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', grounded: false };
   }
 
@@ -61,7 +61,7 @@ export async function respondToMessage({ text, konteks, scopeTags = null, wilaya
     return { reply: null, jenis: aksi, aksi, label: null, grounded: false };
   }
 
-  logInteraksi({ konteks, jenis: aksi, aksi, label: r.label, wilayahTag, ringkasResp: ringkasResp(reply) });
+  await logInteraksi({ konteks, jenis: aksi, aksi, label: r.label, wilayahTag, ringkasResp: ringkasResp(reply) });
 
   // Catat giliran ke memori efemeral (RAM, per-sesi, TTL) supaya follow-up nyambung.
   // Teks mentah (bisa ber-PII) hanya tinggal di RAM sesaat; yang masuk DB hanya ringkasan no-PII via tool.

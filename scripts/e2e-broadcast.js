@@ -7,6 +7,7 @@
 // Opsi env:  E2E_DB_PATH (default ./data/_e2e.db), E2E_KEEP=1 (jangan hapus DB e2e di awal).
 
 // WAJIB diset SEBELUM import apa pun yang menyentuh config (DB_PATH dibaca saat import).
+process.env.SUPABASE_DB_URL = ''; // isolasi SQLite (string kosong agar dotenv tak isi ulang) — jangan sentuh Supabase prod
 process.env.DB_PATH = process.env.E2E_DB_PATH || './data/_e2e.db';
 process.env.SCRAPE_ON_BOOT = 'false'; // kita panggil scrape manual di sini
 process.env.SCRAPE_AUTO = 'false';
@@ -53,7 +54,7 @@ const grupContoh = [
   { idGrup: 'E2E_BANYUMAS@g.us', daerah: 'Kab. Banyumas', wilayahTag: 'kabupaten:banyumas', provinsiTag: 'provinsi:jawa_tengah' },
   { idGrup: 'E2E_BOGOR@g.us', daerah: 'Kab. Bogor', wilayahTag: 'kabupaten:bogor', provinsiTag: 'provinsi:jawa_barat' },
 ];
-for (const g of grupContoh) upsertGrup(g);
+for (const g of grupContoh) await upsertGrup(g);
 console.log(`\n✅ ${grupContoh.length} grup contoh terdaftar (/start):`);
 for (const g of grupContoh) console.log(`   • ${g.daerah}  [${g.wilayahTag}]`);
 
@@ -81,7 +82,7 @@ line();
 console.log(`Sumber dipindai  : ${r.total}`);
 console.log(`Tersimpan (OK)   : ${r.ok}`);
 console.log(`Dilewati (skip)  : ${r.skip}`);
-console.log(`Total info di KB : ${countInfoBansos()}`);
+console.log(`Total info di KB : ${await countInfoBansos()}`);
 console.log(`Pesan broadcast  : ${kiriman}`);
 console.log(`Durasi           : ${dur}s`);
 

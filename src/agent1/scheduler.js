@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { config, hasLLM, hasSearch } from '../config.js';
 import { ingestUrl } from './index.js';
+import { extractLinks } from './fetch.js';
 import { searchOfficialSources } from './search.js';
 import { broadcastNewInfos } from './broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
@@ -48,18 +49,34 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
   let ok = 0;
   let skip = 0;
   const fresh = [];
+  const MAX_CRAWL = 12; // batasi link anak per hub (hindari over-fetch)
+  const ingestOne = async (url, wilayah) => {
+    try {
+      const r = await ingestUrl(url, { hintWilayah: wilayah, refresh: true });
+      if (r.ok) {
+        ok++;
+        if (r.record) fresh.push(r.record);
+      } else skip++;
+    } catch (e) {
+      skip++;
+      console.warn(`[Agent1] SKIP ${url} — ${e.message}`);
+    }
+  };
   try {
     for (const s of sources) {
-      try {
-        const r = await ingestUrl(s.url, { hintWilayah: s.wilayah, refresh: true });
-        if (r.ok) {
-          ok++;
-          if (r.record) fresh.push(r.record);
-        } else skip++;
-      } catch (e) {
-        skip++;
-        console.warn(`[Agent1] SKIP ${s.url} — ${e.message}`);
+      // Halaman HUB/listing (crawl:true): ambil link program anak lalu ingest tiap-tiap (bukan hub-nya).
+      if (s.crawl) {
+        let links = [];
+        try {
+          links = (await extractLinks(s.url)).slice(0, MAX_CRAWL);
+        } catch (e) {
+          console.warn(`[Agent1] crawl gagal ${s.url}: ${e.message}`);
+        }
+        console.log(`[Agent1] 🕸️  hub ${s.url} → ${links.length} kandidat halaman program`);
+        for (const link of links) await ingestOne(link, s.wilayah);
+        continue;
       }
+      await ingestOne(s.url, s.wilayah);
     }
   } finally {
     _running = false;

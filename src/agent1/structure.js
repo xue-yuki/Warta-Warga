@@ -22,7 +22,15 @@ Yang BUKAN bansos (TIDAK relevan), tandai relevan_bansos=false:
   (mis. "apa itu bantuan sosial") TANPA satu program spesifik yang bernama & bisa didaftar.
 PROGRAM HARUS SPESIFIK & PUNYA NAMA RESMI (mis. "PKH", "BPNT/Sembako", "PIP", "BLT Dana Desa",
 "Rutilahu"). Kalau teks cuma bicara "bantuan sosial"/"bansos" sebagai istilah umum tanpa nama
-program konkret → relevan_bansos=false dan jenis_konten="definisi_umum".`;
+program konkret → relevan_bansos=false dan jenis_konten="definisi_umum".
+
+HALAMAN PROGRAM vs ARTIKEL BERITA (penting):
+- RELEVAN hanya HALAMAN PROGRAM RESMI itu sendiri — yang menjelaskan program: apa itu, syarat, cara daftar.
+- ARTIKEL BERITA / siaran pers / liputan kegiatan / agenda pejabat yang HANYA menyebut/membahas program
+  (mis. "Pemkot serahkan bansos PKH ke 200 KK", "Digitalisasi penyaluran bansos", kunjungan/peresmian) →
+  relevan_bansos=false, jenis_konten="berita_umum". JANGAN diperlakukan sebagai halaman program.
+- Ciri BERITA: ada tanggal terbit/penulis, narasi peristiwa & kutipan pejabat, fokus pada kejadian —
+  BUKAN deskripsi syarat & cara daftar. Kalau ragu antara halaman-program vs berita → pilih berita_umum.`;
 
 function userPrompt(text, hintWilayah) {
   const hariIni = new Date().toISOString().slice(0, 10);

@@ -7,6 +7,7 @@
 // Jalankan:  npm run demo:lapor
 // 100% OFFLINE: DB terpisah + LLM dimatikan (pakai fallback heuristik/pola) + broadcaster KONSOL.
 
+process.env.SUPABASE_DB_URL = ''; // isolasi SQLite (string kosong agar dotenv tak isi ulang) — jangan sentuh Supabase prod
 process.env.DB_PATH = process.env.DEMO_DB_PATH || './data/_demo_lapor.db';
 process.env.OPENROUTER_API_KEY = ''; // matikan LLM → uji jalur fallback (pola penipuan tetap jalan)
 process.env.EMBEDDINGS_PROVIDER = 'hashing';
@@ -42,7 +43,7 @@ const grup = [
   { idGrup: 'DEMO_BANYUMAS@g.us', daerah: 'Kab. Banyumas', wilayahTag: 'kabupaten:banyumas', provinsiTag: 'provinsi:jawa_tengah' },
   { idGrup: 'DEMO_BEKASI@g.us', daerah: 'Kab. Bekasi', wilayahTag: 'kabupaten:bekasi', provinsiTag: 'provinsi:jawa_barat' },
 ];
-for (const g of grup) upsertGrup(g);
+for (const g of grup) await upsertGrup(g);
 console.log('✅ Grup opt-in:', grup.map((g) => g.daerah).join(', '));
 
 // 2) Simulasi laporan warga (TANPA identitas — kita tak menyimpan siapa pelapornya).
@@ -59,7 +60,7 @@ for (const l of laporanMasuk) {
 
 // 3) Antrian approval (Lapis 2): hanya 'jelas_penipuan' yang muncul.
 line();
-const antrian = listAntrianApproval();
+const antrian = await listAntrianApproval();
 console.log('🗂️  ANTRIAN APPROVAL (jelas_penipuan, menunggu):', antrian.length, 'item');
 for (const a of antrian) {
   console.log(`   #${a.id} [${a.wilayah_tag}] "${a.isi_ringkas}" — ${a.jumlah_serupa} laporan serupa`);
@@ -78,14 +79,14 @@ setBroadcaster(async (jid, text) => {
 
 const target = antrian[0];
 line();
-const sebelum = await broadcastPeringatan(getLaporan(target.id));
+const sebelum = await broadcastPeringatan(await getLaporan(target.id));
 console.log(`🚫 Coba sebar SEBELUM approve → terkirim ${sebelum.sent} (reason: ${sebelum.reason}) — Lapis 2 bekerja ✅`);
 
 // 5) Pengurus APPROVE → baru boleh sebar.
 line();
 console.log(`👤 Pengurus approve laporan #${target.id}...\n`);
-setApprovalLaporan(target.id, 'disetujui');
-const res = await broadcastPeringatan(getLaporan(target.id));
+await setApprovalLaporan(target.id, 'disetujui');
+const res = await broadcastPeringatan(await getLaporan(target.id));
 
 // 6) Verifikasi: dedup + filter wilayah.
 line();
@@ -93,7 +94,7 @@ console.log('📊 HASIL');
 line();
 console.log(`Peringatan terkirim : ${res.sent} grup`);
 for (const g of grup) console.log(`   • ${g.daerah.padEnd(14)} : ${tally[g.idGrup] || 0} pesan`);
-const ulang = await broadcastPeringatan(getLaporan(target.id));
+const ulang = await broadcastPeringatan(await getLaporan(target.id));
 console.log(`\n🔁 Sebar ulang (uji dedup): ${ulang.sent} (reason: ${ulang.reason}) → ${ulang.sent === 0 ? 'DEDUP OK ✅' : 'GAGAL ❌'}`);
 const bocorBekasi = (tally['DEMO_BEKASI@g.us'] || 0) > 0;
 console.log(`📍 Filter wilayah (Banyumas tak bocor ke Bekasi): ${bocorBekasi ? 'BOCOR ❌' : 'AMAN ✅'}`);

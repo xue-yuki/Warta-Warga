@@ -13,7 +13,7 @@ import { humanWilayah } from '../util/wilayah.js';
 import { humanModus } from '../agent2/lapor.js';
 
 const TREN_DAYS = 30;
-const trenItems = () => trendingModus({ days: TREN_DAYS, limit: 5 }).map((r) => ({ label: humanModus(r.modus_key), total: r.total }));
+const trenItems = async () => (await trendingModus({ days: TREN_DAYS, limit: 5 })).map((r) => ({ label: humanModus(r.modus_key), total: r.total }));
 
 const esc = (s) =>
   String(s ?? '')
@@ -48,9 +48,10 @@ function kartu(l, { prioritas = false } = {}) {
   </div>`;
 }
 
-function halaman({ flash } = {}) {
-  const antrian = listAntrianApproval();
-  const prioritas = listPrioritasBelumPasti(3);
+async function halaman({ flash } = {}) {
+  const antrian = await listAntrianApproval();
+  const prioritas = await listPrioritasBelumPasti(3);
+  const items = await trenItems();
   const online = hasBroadcaster();
   return `<!doctype html><html lang="id"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -85,18 +86,17 @@ function halaman({ flash } = {}) {
   <div class="sub">Tinjau laporan penipuan, lalu <b>Approve</b> untuk menyebar peringatan ke grup sewilayah.
     Status bot: <span class="status ${online ? 'on' : 'off'}">${online ? 'terhubung WhatsApp' : 'tidak terhubung (penyebaran ditunda)'}</span></div>
   ${flash ? `<div class="flash">${esc(flash)}</div>` : ''}
-  ${(() => {
-    const items = trenItems();
-    if (!items.length) return '';
-    const list = items.map((it, i) => `<li><b>${esc(it.label)}</b> — ${it.total} laporan</li>`).join('');
-    return `<div class="card tren">
+  ${
+    items.length
+      ? `<div class="card tren">
       <div class="head"><span class="badge b-tren">📊 LAGI MARAK</span><span class="wil">Nasional · ${TREN_DAYS} hari terakhir</span></div>
-      <ol class="trenlist">${list}</ol>
+      <ol class="trenlist">${items.map((it) => `<li><b>${esc(it.label)}</b> — ${it.total} laporan</li>`).join('')}</ol>
       <form method="POST" action="/tren/sebar-nasional" onsubmit="return confirm('Sebar digest ini ke SEMUA grup terdaftar?')">
         <div class="actions"><button class="ok" type="submit">📢 Sebar digest ke semua grup</button></div>
       </form>
-    </div>`;
-  })()}
+    </div>`
+      : ''
+  }
   <h2 style="font-size:15px">Menunggu approval (${antrian.length})</h2>
   ${antrian.length ? antrian.map((l) => kartu(l)).join('') : '<div class="empty">Tidak ada antrian. 🎉</div>'}
   ${prioritas.length ? `<h2 style="font-size:15px">Prioritas tinjau — laporan menumpuk (${prioritas.length})</h2>${prioritas.map((l) => kartu(l, { prioritas: true })).join('')}` : ''}
@@ -107,13 +107,13 @@ export function createDashboardApp() {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
 
-  app.get('/', (req, res) => res.send(halaman({ flash: req.query.flash })));
+  app.get('/', async (req, res) => res.send(await halaman({ flash: req.query.flash })));
 
   app.post('/laporan/:id/approve', async (req, res) => {
     const id = Number(req.params.id);
     const teks = (req.body?.teks || '').trim() || null;
-    setApprovalLaporan(id, 'disetujui', teks);
-    const r = await broadcastPeringatan(getLaporan(id)).catch((e) => ({ sent: 0, reason: e.message }));
+    await setApprovalLaporan(id, 'disetujui', teks);
+    const r = await broadcastPeringatan(await getLaporan(id)).catch((e) => ({ sent: 0, reason: e.message }));
     const flash =
       r.sent > 0
         ? `✅ Laporan #${id} disetujui & peringatan disebar ke ${r.sent} grup.`
@@ -122,7 +122,7 @@ export function createDashboardApp() {
   });
 
   app.post('/tren/sebar-nasional', async (req, res) => {
-    const items = trenItems();
+    const items = await trenItems();
     const r = await broadcastTrenNasional(items, { scope: 'Nasional', days: TREN_DAYS }).catch((e) => ({ sent: 0, reason: e.message }));
     const flash =
       r.sent > 0
@@ -131,9 +131,9 @@ export function createDashboardApp() {
     res.redirect('/?flash=' + encodeURIComponent(flash));
   });
 
-  app.post('/laporan/:id/reject', (req, res) => {
+  app.post('/laporan/:id/reject', async (req, res) => {
     const id = Number(req.params.id);
-    setApprovalLaporan(id, 'ditolak');
+    await setApprovalLaporan(id, 'ditolak');
     res.redirect('/?flash=' + encodeURIComponent(`🚫 Laporan #${id} ditolak — tidak akan disebar.`));
   });
 

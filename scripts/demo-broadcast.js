@@ -14,6 +14,7 @@
 //     Selain itu (simpan, index, filter wilayah, dedup, format, broadcast) TIDAK butuh LLM.
 
 // Diset SEBELUM import apa pun (config membaca env saat di-import).
+process.env.SUPABASE_DB_URL = ''; // isolasi SQLite (string kosong agar dotenv tak isi ulang) — jangan sentuh Supabase prod
 process.env.DB_PATH = process.env.DEMO_DB_PATH || './data/_demo.db';
 process.env.EMBEDDINGS_PROVIDER = process.env.EMBEDDINGS_PROVIDER || 'hashing'; // offline, instan
 process.env.SCRAPE_AUTO = 'false';
@@ -36,7 +37,7 @@ if (!process.env.DEMO_KEEP) {
 }
 
 const { ROOT } = await import('../src/config.js');
-const { getDb, resetKnowledge, upsertGrup, countInfoBansos, countChunks } = await import('../src/db/index.js');
+const { getDb, initDb, resetKnowledge, upsertGrup, countInfoBansos, countChunks } = await import('../src/db/index.js');
 const { storeStructured } = await import('../src/agent1/index.js');
 const { setBroadcaster, broadcastNewInfos } = await import('../src/agent1/broadcast.js');
 
@@ -49,15 +50,15 @@ console.log('Embeddings  : hashing (offline, tanpa download)');
 console.log('Broadcaster : KONSOL (tanpa kirim WA asli)');
 line();
 
-getDb();
-resetKnowledge();
+await initDb();
+await resetKnowledge();
 
 // 1) Grup CONTOH dari wilayah berbeda → buktikan filter wilayah §6.3.
 const grupContoh = [
   { idGrup: 'DEMO_BANYUMAS@g.us', daerah: 'Kab. Banyumas', wilayahTag: 'kabupaten:banyumas', provinsiTag: 'provinsi:jawa_tengah' },
   { idGrup: 'DEMO_BOGOR@g.us', daerah: 'Kab. Bogor', wilayahTag: 'kabupaten:bogor', provinsiTag: 'provinsi:jawa_barat' },
 ];
-for (const g of grupContoh) upsertGrup(g);
+for (const g of grupContoh) await upsertGrup(g);
 console.log('\n✅ Grup contoh terdaftar (/start):');
 for (const g of grupContoh) console.log(`   • ${g.daerah}  [${g.wilayahTag}]`);
 
@@ -75,7 +76,7 @@ for (const it of items) {
     console.warn(`   SKIP ${it.program}: ${r.error}`);
   }
 }
-console.log(`KB sekarang: ${countInfoBansos()} info, ${countChunks()} chunk.`);
+console.log(`KB sekarang: ${await countInfoBansos()} info, ${await countChunks()} chunk.`);
 
 // 3) Broadcaster KONSOL + penghitung per-grup → tunjukkan filter wilayah bekerja.
 const tally = {};

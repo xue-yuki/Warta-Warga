@@ -1,15 +1,17 @@
-import { getDb, countChunks, countInfoBansos } from './db/index.js';
-import { hasLLM, config } from './config.js';
+import { initDb, countChunks, countInfoBansos } from './db/index.js';
+import { hasLLM, hasSupabase, config } from './config.js';
 import { startBot } from './wa/bot.js';
 import { startAutoScrape } from './agent1/scheduler.js';
 import { startDashboard } from './dashboard/server.js';
 
 async function main() {
-  getDb(); // init skema
+  await initDb(); // init skema (SQLite atau Postgres/Supabase)
   console.log('🏘️  Warta Warga — Asisten Info Bansos + Anti-Hoaks');
-  console.log(`   Knowledge Base: ${countInfoBansos()} info, ${countChunks()} chunk`);
+  console.log(`   Penyimpanan: ${hasSupabase() ? 'Supabase (Postgres)' : 'SQLite lokal'}`);
+  const nChunks = await countChunks();
+  console.log(`   Knowledge Base: ${await countInfoBansos()} info, ${nChunks} chunk`);
   console.log(`   Embeddings: ${config.embeddings.provider} | LLM: ${hasLLM() ? 'OpenRouter aktif' : 'TIDAK aktif (mode fallback)'}`);
-  if (countChunks() === 0) {
+  if (nChunks === 0) {
     console.warn('   ⚠️  KB kosong. Jalankan `npm run seed` (data sintetis) atau `npm run ingest` dulu.');
   }
   if (!hasLLM()) {

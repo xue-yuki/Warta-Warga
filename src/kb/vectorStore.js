@@ -41,18 +41,18 @@ export async function indexInfo(infoId, info) {
   const doc = infoToDocument(info);
   const chunks = chunkText(doc);
   const vectors = await embedMany(chunks);
-  chunks.forEach((content, i) => {
-    insertChunk({
+  for (let i = 0; i < chunks.length; i++) {
+    await insertChunk({
       info_id: infoId,
       program: info.program,
-      content,
+      content: chunks[i],
       embedding: vectors[i],
       sumber_url: info.sumber_url,
       wilayah_tag: info.wilayah_tag,
       tanggal_ambil: info.tanggal_ambil,
       batas_daftar: info.batas_daftar || null,
     });
-  });
+  }
   return chunks.length;
 }
 
@@ -82,7 +82,7 @@ const LEX_WEIGHT = 0.4;
  * @param {number} [opts.k]
  */
 export async function search(query, { scopeTags = null, k = 4 } = {}) {
-  const chunks = allChunks();
+  const chunks = await allChunks();
   if (chunks.length === 0) return [];
   const qVec = await embed(query);
   const qTokens = tokenize(query);

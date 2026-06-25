@@ -163,14 +163,14 @@ export async function prosesLaporan({ text, wilayahTag, scopeTags = null }) {
   // Clustering (L5): laporan sejenis (modus + wilayah + status SAMA) → tambah counter, bukan baris
   // baru. Hanya untuk modus SPESIFIK — modus generik ("lainnya") jangan digabung biar tak salah merge.
   const dapatCluster = ringkas.modus_key && ringkas.modus_key !== 'lainnya';
-  const existing = dapatCluster ? findClusterLaporan({ modusKey: ringkas.modus_key, wilayahTag, status }) : null;
+  const existing = dapatCluster ? await findClusterLaporan({ modusKey: ringkas.modus_key, wilayahTag, status }) : null;
   let laporan;
   let clustered = false;
   if (existing) {
-    laporan = bumpLaporanSerupa(existing.id);
+    laporan = await bumpLaporanSerupa(existing.id);
     clustered = true;
   } else {
-    const id = insertLaporan({
+    const id = await insertLaporan({
       isiRingkas: ringkas.isi_ringkas,
       modusKey: ringkas.modus_key,
       wilayahTag,
@@ -189,7 +189,7 @@ export async function prosesLaporan({ text, wilayahTag, scopeTags = null }) {
  * cuma eksekusi efek + dedup/cluster. TIDAK broadcast (nunggu approval pengurus).
  * @returns {{ok:boolean, alasan?:string, pesan?:string, status?:string, clustered?:boolean, wilayah?:string, jumlah_serupa?:number}}
  */
-export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan, wilayahTagGrup = null }) {
+export async function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan, wilayahTagGrup = null }) {
   // Wilayah: utamakan tag grup (sudah valid saat /start); japri → normalisasi input LLM, wajib kab/kota.
   let wilayahTag = wilayahTagGrup && isKabKota(wilayahTagGrup) ? wilayahTagGrup : null;
   if (!wilayahTag && wilayah_kabkota) {
@@ -207,16 +207,16 @@ export function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, tingkat_ba
   const modusKey = matchScamPattern(isiRingkas) || 'lainnya';
 
   // Cluster hanya untuk modus SPESIFIK (modus + wilayah + status sama) — 'lainnya' jangan digabung.
-  const existing = modusKey !== 'lainnya' ? findClusterLaporan({ modusKey, wilayahTag, status }) : null;
+  const existing = modusKey !== 'lainnya' ? await findClusterLaporan({ modusKey, wilayahTag, status }) : null;
   let laporan;
   let clustered = false;
   if (existing) {
-    laporan = bumpLaporanSerupa(existing.id);
+    laporan = await bumpLaporanSerupa(existing.id);
     clustered = true;
     // Fast-track: pas nyentuh ambang (sekali), ping pengurus untuk segera tinjau. Bukan auto-sebar.
     if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => {});
   } else {
-    const id = insertLaporan({
+    const id = await insertLaporan({
       isiRingkas,
       modusKey,
       wilayahTag,

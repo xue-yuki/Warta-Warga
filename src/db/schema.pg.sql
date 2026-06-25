@@ -1,0 +1,80 @@
+-- Skema Postgres (Supabase) Warta Warga — mirror schema.sql (SQLite) untuk backend deploy.
+-- Catatan: id pakai SERIAL (int4 → balik sbg number di driver), timestamp disimpan sbg TEXT (ISO string)
+-- biar shape baris identik dgn SQLite, syarat/embedding sbg JSONB. Idempoten (CREATE IF NOT EXISTS).
+
+CREATE TABLE IF NOT EXISTS grup (
+  id_grup       TEXT PRIMARY KEY,
+  daerah        TEXT,
+  wilayah_tag   TEXT,
+  provinsi_tag  TEXT,
+  status_start  SMALLINT NOT NULL DEFAULT 0,
+  tgl_start     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS info_bansos (
+  id              SERIAL PRIMARY KEY,
+  program         TEXT NOT NULL,
+  ringkasan       TEXT NOT NULL,
+  syarat          JSONB,
+  tanggal_penting TEXT,
+  batas_daftar    TEXT,
+  cara_daftar     TEXT,
+  wilayah_tag     TEXT NOT NULL,
+  sumber_url      TEXT NOT NULL,
+  tanggal_ambil   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kb_chunks (
+  id            SERIAL PRIMARY KEY,
+  info_id       INTEGER REFERENCES info_bansos(id) ON DELETE CASCADE,
+  program       TEXT,
+  content       TEXT NOT NULL,
+  embedding     JSONB NOT NULL,
+  dim           INTEGER NOT NULL,
+  sumber_url    TEXT NOT NULL,
+  wilayah_tag   TEXT NOT NULL,
+  tanggal_ambil TEXT NOT NULL,
+  batas_daftar  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS broadcast_log (
+  fingerprint TEXT PRIMARY KEY,
+  program     TEXT,
+  wilayah_tag TEXT,
+  grup_count  INTEGER,
+  ts          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS laporan (
+  id               SERIAL PRIMARY KEY,
+  isi_ringkas      TEXT NOT NULL,
+  modus_key        TEXT,
+  wilayah_tag      TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  jumlah_serupa    INTEGER NOT NULL DEFAULT 1,
+  status_approval  TEXT NOT NULL DEFAULT 'menunggu',
+  dasar_verifikasi TEXT,
+  teks_peringatan  TEXT,
+  timestamp        TEXT NOT NULL,
+  updated_ts       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS peringatan_terkirim (
+  id          SERIAL PRIMARY KEY,
+  laporan_id  INTEGER REFERENCES laporan(id) ON DELETE CASCADE,
+  wilayah_tag TEXT,
+  grup_count  INTEGER,
+  timestamp   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS log_interaksi (
+  id            SERIAL PRIMARY KEY,
+  konteks       TEXT,
+  jenis         TEXT,
+  aksi          TEXT,
+  label         TEXT,
+  wilayah_tag   TEXT,
+  ringkas_pesan TEXT,
+  ringkas_resp  TEXT,
+  timestamp     TEXT NOT NULL
+);

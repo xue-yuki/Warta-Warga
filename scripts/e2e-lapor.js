@@ -4,6 +4,7 @@
 //
 // Jalankan:  npm run e2e:lapor   (butuh OPENROUTER_API_KEY di .env)
 
+process.env.SUPABASE_DB_URL = ''; // isolasi: tes selalu di SQLite lokal, JANGAN sentuh Supabase prod (string kosong, bukan delete, agar dotenv tak isi ulang)
 process.env.DB_PATH = process.env.E2E_DB_PATH || './data/_e2e_lapor.db';
 process.env.EMBEDDINGS_PROVIDER = process.env.EMBEDDINGS_PROVIDER || 'hashing'; // offline embeddings; LLM tetap aktif
 process.env.SCRAPE_AUTO = 'false';
@@ -44,13 +45,13 @@ if (!hasLLM()) {
 }
 
 // 1) Seed KB nasional (agar verifikasi sumber punya bahan) — dari data sintetis, tanpa LLM.
-resetKnowledge();
+await resetKnowledge();
 const items = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'synthetic', 'info_bansos.json'), 'utf8'));
 for (const it of items.filter((x) => x.wilayah_tag === 'nasional')) await storeStructured(it);
 console.log('🌱 KB seed (nasional) siap untuk verifikasi.');
 
 // 2) Grup opt-in.
-upsertGrup({ idGrup: 'E2E_BANYUMAS@g.us', daerah: 'Kab. Banyumas', wilayahTag: 'kabupaten:banyumas', provinsiTag: 'provinsi:jawa_tengah' });
+await upsertGrup({ idGrup: 'E2E_BANYUMAS@g.us', daerah: 'Kab. Banyumas', wilayahTag: 'kabupaten:banyumas', provinsiTag: 'provinsi:jawa_tengah' });
 
 // 3) Laporan uji + status yang DIHARAPKAN.
 const kasus = [
@@ -80,7 +81,7 @@ line();
 console.log(`Status benar: ${lolos}/${kasus.length}`);
 
 // 4) Antrian → approve satu → broadcast.
-const antrian = listAntrianApproval();
+const antrian = await listAntrianApproval();
 console.log(`\n🗂️  Antrian approval (jelas_penipuan): ${antrian.length} item`);
 let kirim = 0;
 setBroadcaster(async (jid, text) => {
@@ -91,10 +92,10 @@ setBroadcaster(async (jid, text) => {
 if (antrian.length) {
   const a = antrian[0];
   console.log(`\n👤 Approve #${a.id} lalu broadcast...\n`);
-  setApprovalLaporan(a.id, 'disetujui');
-  const res = await broadcastPeringatan(getLaporan(a.id));
+  await setApprovalLaporan(a.id, 'disetujui');
+  const res = await broadcastPeringatan(await getLaporan(a.id));
   line();
-  console.log(`Peringatan terkirim: ${res.sent} grup | dedup ulang: ${(await broadcastPeringatan(getLaporan(a.id))).sent}`);
+  console.log(`Peringatan terkirim: ${res.sent} grup | dedup ulang: ${(await broadcastPeringatan(await getLaporan(a.id))).sent}`);
 }
 line();
 console.log('\nℹ️  Verifikasi: jelas_penipuan dari pola/contradict, belum_pasti dari unverified tanpa pola,');

@@ -26,6 +26,12 @@ export const config = {
 
   dbPath: abs(process.env.DB_PATH || './data/warta.db'),
 
+  // Persistensi: bila SUPABASE_DB_URL diset → backend Postgres (Supabase, deploy); kosong → SQLite lokal.
+  // Ambil connection string dari Supabase Dashboard → Settings → Database → Connection string (pooler).
+  supabase: {
+    dbUrl: process.env.SUPABASE_DB_URL || '',
+  },
+
   // Agent 1 auto-scrape: pindai data/sources.json secara berkala.
   scrape: {
     enabled: (process.env.SCRAPE_AUTO ?? 'true') !== 'false', // default nyala
@@ -86,6 +92,7 @@ export const config = {
 
 export const hasLLM = () => Boolean(config.openrouter.apiKey);
 export const hasVision = () => Boolean(config.vision.apiKey);
+export const hasSupabase = () => Boolean(config.supabase.dbUrl);
 export const hasSearch = () => {
   const s = config.search;
   if (s.provider === 'serper') return Boolean(s.serperKey);
