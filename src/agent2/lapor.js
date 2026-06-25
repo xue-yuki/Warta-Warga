@@ -76,23 +76,26 @@ function labelToStatus(label, scamKey) {
   return scamKey ? 'jelas_penipuan' : 'belum_pasti';
 }
 
-const SUMMARIZE_SYSTEM = `Kamu meringkas LAPORAN PENIPUAN/MODUS APA PUN dari warga (tidak terbatas bansos —
-bisa ngaku petugas/bank/CS, link/undian/lowongan palsu, investasi/pinjol bodong, dll) untuk arsip
-& peringatan komunitas.
+const SUMMARIZE_SYSTEM = `Kamu meringkas laporan penipuan/modus dari warga untuk arsip dan peringatan komunitas.
+
 ATURAN KERAS:
-- BUANG semua identitas/data pribadi (nama, nomor HP, alamat, NIK) — JANGAN disertakan.
-- Ringkas MODUS-nya secara umum & netral.
-- Nilai apakah laporan ini MENCURIGAKAN sebagai penipuan (meski belum tentu pasti).
-Jawab JSON: {
-  "isi_ringkas": string,    // 1 kalimat modus, tanpa data pribadi
-  "modus_key": string,      // label snake_case singkat, mis. "ngaku_petugas" | "link_palsu" | "undian_hadiah_palsu" | "investasi_bodong" | "lainnya"
-  "teks_peringatan": string,// 1-2 kalimat peringatan umum untuk warga, tanpa identitas siapa pun
-  "mencurigakan": boolean,  // true bila berpotensi penipuan (dasar fallback bila tak cocok pola kata kunci)
-  "penilaian": string       // 1 kalimat alasan singkat kenapa mencurigakan / tidak
+- BUANG semua identitas & data pribadi (nama, nomor HP, alamat, NIK) — jangan disertakan sama sekali.
+- Ringkas MODUSNYA secara umum & netral, bukan kasusnya secara spesifik.
+- Nilai apakah laporan mencurigakan sebagai penipuan meski belum tentu pasti.
+
+Output WAJIB JSON valid:
+{
+  "isi_ringkas": "string",      // 1 kalimat modus tanpa data pribadi
+  "modus_key": "string",        // snake_case: "ngaku_petugas" | "link_palsu" | "undian_hadiah_palsu" | "investasi_bodong" | "lainnya"
+  "teks_peringatan": "string",  // 1-2 kalimat peringatan umum untuk warga, tanpa identitas
+  "mencurigakan": true|false,   // true bila berpotensi penipuan
+  "penilaian": "string"         // 1 kalimat alasan singkat
 }`;
+const FALLBACK_PERINGATAN = 'Ada laporan modus penipuan yang beredar. ' +
+  'Jangan transfer uang/pulsa, klik link mencurigakan, atau beri data pribadi (OTP/PIN/NIK).';
 
-const FALLBACK_PERINGATAN = 'Ada laporan modus penipuan yang beredar. Jangan transfer uang/pulsa, klik link mencurigakan, atau memberi data pribadi (OTP/PIN/NIK).';
 
+  
 async function summarizeLaporan(text, scamKey) {
   if (!hasLLM()) {
     return {
@@ -214,7 +217,7 @@ export async function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, ting
     laporan = await bumpLaporanSerupa(existing.id);
     clustered = true;
     // Fast-track: pas nyentuh ambang (sekali), ping pengurus untuk segera tinjau. Bukan auto-sebar.
-    if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => {});
+    if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => { });
   } else {
     const id = await insertLaporan({
       isiRingkas,

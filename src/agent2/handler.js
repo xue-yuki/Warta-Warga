@@ -7,14 +7,14 @@ import { logInteraksi } from '../db/index.js';
 import { getHistory, pushTurn } from './convo.js';
 import { isInjection, isOffTopicTask, looksLikeCode, REFUSAL_REPLY } from './guard.js';
 
-export const GREETING = `👋 Halo! Saya *Warta Warga*, asisten info bansos & waspada penipuan.
-
-Saya bisa bantu kamu:
+export const GREETING = `👋 Halo! Saya *Warta Warga*, teman info bansos & waspada penipuan.
+ 
+Saya bisa bantu:
 1️⃣ *Tanya info bansos* — mis. "syarat PKH apa?" atau "ada bansos di daerahku?"
-2️⃣ *Cek kabar/klaim* — kirim kabar yang kamu ragukan, mis. "ini benar nggak: ada bantuan 600rb klik link..."
-3️⃣ *Lapor penipuan* — kirim modus yang lagi marak (ngaku petugas/bank/CS, link & undian palsu, minta OTP/transfer, lowongan/investasi bodong, dll). Kalau valid & banyak laporan serupa, saya sebar peringatan ke grup daerahmu (setelah ditinjau pengurus).
-
-Semua jawaban saya bersumber dari info resmi (.go.id/Kemensos) dan selalu saya cantumkan sumbernya. Saya *tidak* menyimpan data pribadimu. 🙏`;
+2️⃣ *Cek kabar* — kirim kabar yang kamu ragukan, mis. "ini benar nggak: ada bantuan 600rb klik link..."
+3️⃣ *Lapor penipuan* — modus yang lagi marak (ngaku petugas/bank, link palsu, minta OTP/transfer, dll). Kalau valid, saya sebar peringatan ke grup daerahmu setelah ditinjau pengurus.
+ 
+Semua jawaban bersumber dari info resmi (.go.id/Kemensos) dan selalu saya cantumkan sumbernya. Saya *tidak* menyimpan data pribadimu. 🙏`;
 
 // Ringkasan respons bot untuk analytics (bot bicara PII-free) — buang baris meta & potong.
 function ringkasResp(reply) {

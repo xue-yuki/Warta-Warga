@@ -42,9 +42,9 @@ export function isOffTopicTask(text) {
 
 // Jawaban tetap (tidak digenerate LLM → tidak bisa di-override oleh isi pesan).
 export const REFUSAL_REPLY =
-  'Maaf ya, aku khusus *asisten info bansos* 🙏 Aku nggak bisa ganti peran, ngikutin perintah buat keluar dari tugas itu, ' +
-  'atau ngerjain hal di luar bansos (nulis kode, esai, terjemahan, dll). ' +
-  'Tapi soal bansos — syarat, cara daftar, jadwal, atau cek kabar yang kamu ragu — aku siap bantu! 😊';
+  'Maaf ya, aku khusus *asisten info bansos & waspada penipuan* 🙏 ' +
+  'Aku nggak bisa ganti peran atau ngerjain hal di luar itu (nulis kode, esai, terjemahan, dll). ' +
+  'Tapi soal bansos atau kabar yang kamu ragukan — aku siap bantu! 😊';
 
 // --- LAPIS 4 (output guard): balasan TIDAK BOLEH mengandung kode. ---
 const CODE_SIGNALS = [/```/, /\bdef\s+\w+\s*\(/, /\bprint\s*\(/, /console\.log/, /<\/[a-z][\w-]*>/i, /\bimport\s+\w+/, /\bpublic\s+static\b/];

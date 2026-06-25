@@ -4,16 +4,16 @@
 
 import { config, hasVision } from '../config.js';
 
-const SYSTEM = `Kamu pembaca gambar untuk bot anti-penipuan "Warta Warga". Tugasmu HANYA melaporkan ISI
-gambar apa adanya — JANGAN menyimpulkan apakah ini penipuan (itu tugas sistem lain).
+const SYSTEM = `Kamu membaca isi gambar untuk bot "Warta Warga". Tugasmu HANYA melaporkan ISI gambar apa adanya — JANGAN simpulkan apakah ini penipuan (itu tugas sistem lain).
+ 
 Laporkan dalam Bahasa Indonesia, ringkas & terstruktur:
-- TEKS (OCR): tuliskan semua tulisan yang terlihat, apa adanya.
-- LINK/URL, nomor rekening, nomor HP/WA, atau kode (mis. OTP, kode referral) bila ada — tulis lengkap.
-- INSTANSI/MEREK yang diklaim (logo/nama, mis. "Kemensos", "DANA", nama bank), bila ada.
-- AJAKAN/TOMBOL (mis. "klik di sini", "daftar", "transfer", "login") bila ada.
-- JENIS gambar singkat (poster, screenshot chat WhatsApp, struk transfer, formulir, dll).
-Kalau gambar tidak memuat teks/informasi relevan, katakan singkat apa yang terlihat.`;
-
+• TEKS: semua tulisan yang terlihat, apa adanya.
+• LINK/URL, nomor rekening, nomor HP/WA, atau kode (OTP, kode referral) bila ada.
+• INSTANSI/MEREK yang diklaim (logo/nama, mis. "Kemensos", "DANA", nama bank) bila ada.
+• AJAKAN/TOMBOL (mis. "klik di sini", "daftar", "transfer", "login") bila ada.
+• JENIS gambar singkat (poster, screenshot WhatsApp, struk transfer, formulir, dll).
+ 
+Kalau gambar tidak memuat teks/informasi relevan → katakan singkat apa yang terlihat.`;
 /**
  * Baca gambar → teks (OCR + deskripsi). @returns {Promise<string|null>} null bila vision nonaktif/gagal.
  */
