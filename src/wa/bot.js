@@ -230,7 +230,9 @@ async function handleOne(sock, msg, botJid) {
 
   // F2.1: bedakan grup vs japri dari JID.
   const isGroup = jid.endsWith('@g.us');
-  const send = (body) => sock.sendMessage(jid, { text: body });
+  // Di grup, balas dengan MENGUTIP (reply) pesan pemicunya supaya jelas menjawab pertanyaan
+  // siapa — beberapa warga bisa bertanya berbarengan. Di japri (1-1) tak perlu kutipan.
+  const send = (body) => sock.sendMessage(jid, { text: body }, isGroup ? { quoted: msg } : undefined);
   let text = extractText(msg);
 
   // Gambar (poster/screenshot/struk penipuan): baca jadi teks via vision lalu gabung dgn caption.
@@ -316,6 +318,7 @@ async function handleGroup(sock, jid, msg, text, botJid, send) {
       wilayahTag: grup?.wilayah_tag || null,
       send,
       sessionId: `${jid}:${sender}`,
+      quoted: msg, // kutip pesan pemicu pada balasan & follow-up (termasuk jawaban tertunda)
     });
   } finally {
     await presence(sock, jid, 'paused');
@@ -326,7 +329,7 @@ async function handleGroup(sock, jid, msg, text, botJid, send) {
  * Jawab pesan berkonten, dan bila user menanyakan info untuk daerah yang BELUM ada di KB,
  * picu on-demand scraping: balas "bentar ya" lalu follow-up otomatis setelah datanya ketemu.
  */
-async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, justGreeted, send, sessionId }) {
+async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, justGreeted, send, sessionId, quoted = null }) {
   // Daerah spesifik yang disebut user (atau wilayah grup) yang belum punya data lokal.
   const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
   const uncovered = target && isKabKota(target) && (await countInfoByWilayah(target)) === 0;
@@ -344,7 +347,7 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
         `Oke, soal bansos di *${humanWilayah(target)}* aku belum punya datanya nih. ` +
           `Bentar ya, aku cariin dari situs resmi pemerintah dulu… 🔎 nanti aku kabarin lagi.`,
       );
-      discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }); // background, JANGAN di-await
+      discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId, quoted }); // background, JANGAN di-await
     }
     return;
   }
@@ -353,7 +356,7 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
 }
 
 /** Proses latar belakang: scrape daerah lewat web search, lalu kirim follow-up berisi hasilnya. */
-async function discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId }) {
+async function discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target, sessionId, quoted = null }) {
   regionJobs.add(target);
   try {
     await scrapeRegion(humanWilayah(target), target);
@@ -387,11 +390,11 @@ async function discoverAndFollowUp(sock, jid, { text, konteks, scopeTags, target
     }
     // Beri label agar jelas ini JAWABAN TERTUNDA dari pertanyaan tadi (datang setelah jeda
     // pencarian), bukan pesan acak di tengah obrolan lain. Mengurangi kesan "bot ngelantur".
-    await sock.sendMessage(jid, { text: `📌 _Lanjutan dari pencarianku tadi soal *${humanWilayah(target)}*:_\n\n${out}` });
+    await sock.sendMessage(jid, { text: `📌 _Lanjutan dari pencarianku tadi soal *${humanWilayah(target)}*:_\n\n${out}` }, quoted ? { quoted } : undefined);
   } catch (e) {
     console.warn('[ondemand] gagal:', e?.message);
     await sock
-      .sendMessage(jid, { text: `Maaf kak, ada kendala pas nyari info *${humanWilayah(target)}*. Coba lagi nanti ya 🙏` })
+      .sendMessage(jid, { text: `Maaf kak, ada kendala pas nyari info *${humanWilayah(target)}*. Coba lagi nanti ya 🙏` }, quoted ? { quoted } : undefined)
       .catch(() => {});
   } finally {
     regionJobs.delete(target);
