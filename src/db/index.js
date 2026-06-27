@@ -26,6 +26,7 @@ function sqliteDb() {
   _sqlite.pragma('foreign_keys = ON');
   _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   ensureColumn(_sqlite, 'info_bansos', 'batas_daftar', 'TEXT');
+  ensureColumn(_sqlite, 'info_bansos', 'image_path', 'TEXT');
   ensureColumn(_sqlite, 'kb_chunks', 'batas_daftar', 'TEXT');
   ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
   ensureColumn(_sqlite, 'log_interaksi', 'ringkas_pesan', 'TEXT');
@@ -43,6 +44,11 @@ async function pgInit() {
   _pg = postgres(config.supabase.dbUrl, { ssl: 'require', prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} });
   const ddl = fs.readFileSync(path.join(__dirname, 'schema.pg.sql'), 'utf8');
   await _pg.unsafe(ddl); // idempoten (CREATE IF NOT EXISTS)
+  try {
+    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
+  } catch (err) {
+    /* ignore if column exists or alter not supported */
+  }
   return _pg;
 }
 
@@ -111,16 +117,16 @@ export async function insertInfoBansos(info) {
   await initDb();
   if (hasSupabase()) {
     const [row] = await _pg`
-      INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
+      INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_path)
       VALUES (${info.program}, ${info.ringkasan}, ${_pg.json(info.syarat || [])}, ${info.tanggal_penting || null},
-              ${info.batas_daftar || null}, ${info.cara_daftar || null}, ${info.wilayah_tag}, ${info.sumber_url}, ${info.tanggal_ambil})
+              ${info.batas_daftar || null}, ${info.cara_daftar || null}, ${info.wilayah_tag}, ${info.sumber_url}, ${info.tanggal_ambil}, ${info.image_path || null})
       RETURNING id`;
     return row.id;
   }
   return sq()
     .prepare(
-      `INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
-       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil)`,
+      `INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_path)
+       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil, @image_path)`,
     )
     .run({
       program: info.program,
@@ -132,6 +138,7 @@ export async function insertInfoBansos(info) {
       wilayah_tag: info.wilayah_tag,
       sumber_url: info.sumber_url,
       tanggal_ambil: info.tanggal_ambil,
+      image_path: info.image_path || null,
     }).lastInsertRowid;
 }
 

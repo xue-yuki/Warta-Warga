@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   cara_daftar     TEXT,
   wilayah_tag     TEXT NOT NULL,
   sumber_url      TEXT NOT NULL,
-  tanggal_ambil   TEXT NOT NULL
+  tanggal_ambil   TEXT NOT NULL,
+  image_path      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kb_chunks (

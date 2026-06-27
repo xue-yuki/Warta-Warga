@@ -50,8 +50,8 @@ export async function fetchAndParse(url) {
       maxRedirects: 5,
       headers: { 'User-Agent': 'WartaWargaBot/0.1 (+sumber-resmi)' },
     });
-    const { text, title } = cleanHtml(res.data);
-    if (text && text.length >= 80) return { ok: true, text, title };
+    const content = extractValidContent(res.data);
+    if (content) return { ok: true, ...content };
     lastErr = 'Konten kosong/terlalu pendek (mungkin halaman butuh JavaScript).';
   } catch (err) {
     lastErr = err.message;
@@ -65,11 +65,8 @@ export async function fetchAndParse(url) {
   if (isGov) {
     try {
       const html = await localFetch(url);
-      if (html) {
-        const { text, title } = cleanHtml(html);
-        // Halaman SPA 404 ("Halaman Tidak Ditemukan") juga ter-render pendek → tetap dianggap gagal.
-        if (text && text.length >= 80) return { ok: true, text, title, via: 'local-browser' };
-      }
+      const content = extractValidContent(html);
+      if (content) return { ok: true, ...content, via: 'local-browser' };
     } catch (err) {
       lastErr = `render lokal: ${err.message}`;
     }
@@ -80,10 +77,8 @@ export async function fetchAndParse(url) {
   if (hasBrightDataUnlocker()) {
     try {
       const html = hasBrowser() ? await browserFetch(url) : await bdUnlock(url);
-      if (html) {
-        const { text, title } = cleanHtml(html);
-        if (text && text.length >= 80) return { ok: true, text, title, via: hasBrowser() ? 'browser' : 'unlocker' };
-      }
+      const content = extractValidContent(html);
+      if (content) return { ok: true, ...content, via: hasBrowser() ? 'browser' : 'unlocker' };
     } catch (err) {
       lastErr = `render: ${err.response?.status || err.message}`;
     }
@@ -154,6 +149,12 @@ export function cleanHtml(html) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return { text, title };
+}
+
+function extractValidContent(html) {
+  if (!html) return null;
+  const { text, title } = cleanHtml(html);
+  return text && text.length >= 80 ? { text, title } : null;
 }
 
 /** Untuk demo: baca pengumuman sintetis dari file lokal. */

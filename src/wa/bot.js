@@ -177,8 +177,12 @@ export async function startBot() {
     if (connection === 'open') {
       const me = jidNormalizedUser(sock.user?.id);
       console.log(`✅ Terhubung sebagai ${me}`);
-      // Daftarkan pengirim broadcast agar Agent 1 bisa menyebar info baru ke grup.
-      setBroadcaster((jid, text) => sock.sendMessage(jid, { text }));
+      setBroadcaster(async (jid, text, imagePath = null) => {
+        if (imagePath) {
+          return sock.sendMessage(jid, { image: { url: imagePath }, caption: text });
+        }
+        return sock.sendMessage(jid, { text });
+      });
     }
     if (connection === 'close') {
       if (closedHandled) return;

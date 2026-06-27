@@ -80,10 +80,13 @@ console.log(`KB sekarang: ${await countInfoBansos()} info, ${await countChunks()
 
 // 3) Broadcaster KONSOL + penghitung per-grup → tunjukkan filter wilayah bekerja.
 const tally = {};
-setBroadcaster(async (jid, text) => {
+setBroadcaster(async (jid, text, imagePath = null) => {
   tally[jid] = (tally[jid] || 0) + 1;
   line('┄');
   console.log(`📤 BROADCAST → ${jid}`);
+  if (imagePath) {
+    console.log(`🖼️ [IMAGE ATTACHED]: ${imagePath}`);
+  }
   line('┄');
   console.log(text);
   console.log('');

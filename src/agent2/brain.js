@@ -331,10 +331,10 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           const rows = await trendingModus({ days: 30, limit: 5, wilayahTag: isKabKota(wt) ? wt : null });
           result = rows.length
             ? JSON.stringify({
-                cakupan: isKabKota(wt) ? humanWilayah(wt) : 'Nasional',
-                periode: '30 hari terakhir',
-                modus: rows.map((r) => ({ modus: humanModus(r.modus_key), jumlah_laporan: r.total })),
-              })
+              cakupan: isKabKota(wt) ? humanWilayah(wt) : 'Nasional',
+              periode: '30 hari terakhir',
+              modus: rows.map((r) => ({ modus: humanModus(r.modus_key), jumlah_laporan: r.total })),
+            })
             : 'Belum ada laporan terkumpul untuk dirangkum jadi tren.';
         } else if (tc.function?.name === 'cek_url') {
           if (aksi !== 'lapor') aksi = 'info';

@@ -32,8 +32,8 @@ async function main() {
   // info_bansos (pertahankan id agar FK kb_chunks.info_id tetap cocok)
   let nInfo = 0;
   for (const i of rows('info_bansos')) {
-    await sql`INSERT INTO info_bansos (id, program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil)
-      VALUES (${i.id}, ${i.program}, ${i.ringkasan}, ${sql.json(parseJson(i.syarat) || [])}, ${i.tanggal_penting}, ${i.batas_daftar}, ${i.cara_daftar}, ${i.wilayah_tag}, ${i.sumber_url}, ${i.tanggal_ambil})`;
+    await sql`INSERT INTO info_bansos (id, program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_path)
+      VALUES (${i.id}, ${i.program}, ${i.ringkasan}, ${sql.json(parseJson(i.syarat) || [])}, ${i.tanggal_penting}, ${i.batas_daftar}, ${i.cara_daftar}, ${i.wilayah_tag}, ${i.sumber_url}, ${i.tanggal_ambil}, ${i.image_path || null})`;
     nInfo++;
   }
   // Sinkronkan sequence id setelah insert id eksplisit.
@@ -64,6 +64,6 @@ async function main() {
 
 main().catch(async (e) => {
   console.error('❌ Migrasi gagal:', e.message);
-  await sql.end().catch(() => {});
+  await sql.end().catch(() => { });
   process.exit(1);
 });
