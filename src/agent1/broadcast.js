@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import {
   listActiveGrups,
   wasBroadcast,
@@ -100,11 +101,11 @@ function targetGrups(rec) {
 }
 
 /** Kirim satu teks ke daftar grup dengan jeda acak anti-spam. @returns {Promise<number>} grup berhasil */
-async function sendToGrups(targets, text) {
+async function sendToGrups(targets, text, imagePath = null) {
   let okGrup = 0;
   for (let i = 0; i < targets.length; i++) {
     try {
-      await _sender(targets[i].id_grup, text);
+      await _sender(targets[i].id_grup, text, imagePath);
       okGrup++;
     } catch (e) {
       console.warn(`[Broadcast] gagal kirim ke ${targets[i].id_grup}: ${e?.message}`);
@@ -135,11 +136,17 @@ export async function broadcastNewInfos(records) {
     if (targets.length === 0) continue; // belum ada grup cocok → JANGAN tandai, biar dapat saat grup join nanti
 
     const text = formatBroadcast(rec);
+    let imagePath = rec.image_path || null;
+    if (imagePath && !fs.existsSync(imagePath)) {
+      console.warn(`[Broadcast] ⚠️ Image file not found: ${imagePath}. Falling back to text-only.`);
+      imagePath = null;
+    }
+
     let okGrup = 0;
     for (let i = 0; i < targets.length; i++) {
       const g = targets[i];
       try {
-        await _sender(g.id_grup, text);
+        await _sender(g.id_grup, text, imagePath);
         okGrup++;
         sent++;
       } catch (e) {

@@ -22,15 +22,15 @@ function sqliteDb() {
   if (_sqlite) return _sqlite;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
   _sqlite = new Database(config.dbPath);
-  _sqlite.pragma("journal_mode = WAL");
-  _sqlite.pragma("foreign_keys = ON");
-  _sqlite.exec(fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8"));
-  ensureColumn(_sqlite, "info_bansos", "batas_daftar", "TEXT");
+  _sqlite.pragma('journal_mode = WAL');
+  _sqlite.pragma('foreign_keys = ON');
+  _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  ensureColumn(_sqlite, 'info_bansos', 'batas_daftar', 'TEXT');
   ensureColumn(_sqlite, 'info_bansos', 'image_path', 'TEXT');
-  ensureColumn(_sqlite, "kb_chunks", "batas_daftar", "TEXT");
-  ensureColumn(_sqlite, "log_interaksi", "aksi", "TEXT");
-  ensureColumn(_sqlite, "log_interaksi", "ringkas_pesan", "TEXT");
-  ensureColumn(_sqlite, "log_interaksi", "ringkas_resp", "TEXT");
+  ensureColumn(_sqlite, 'kb_chunks', 'batas_daftar', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_pesan', 'TEXT');
+  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_resp', 'TEXT');
   return _sqlite;
 }
 
@@ -44,6 +44,11 @@ async function pgInit() {
   _pg = postgres(config.supabase.dbUrl, { ssl: "require", prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} });
   const ddl = fs.readFileSync(path.join(__dirname, "schema.pg.sql"), "utf8");
   await _pg.unsafe(ddl); // idempoten (CREATE IF NOT EXISTS)
+  try {
+    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
+  } catch (err) {
+    /* ignore if column exists or alter not supported */
+  }
   try {
     await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
   } catch (err) {

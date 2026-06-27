@@ -96,6 +96,12 @@ export const config = {
     model: process.env.IMAGE_MODEL || 'gpt-image-2',
   },
 
+  images: {
+    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || '',
+    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+    model: process.env.IMAGE_MODEL || 'gpt-image-2',
+  },
+
   wa: {
     authDir: abs(process.env.WA_AUTH_DIR || "./auth_state"),
     botJid: process.env.BOT_JID || "",

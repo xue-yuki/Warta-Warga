@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   wilayah_tag     TEXT NOT NULL,             -- F1.3 WAJIB
   sumber_url      TEXT NOT NULL,             -- F1.2 WAJIB
   tanggal_ambil   TEXT NOT NULL,             -- F1.2 WAJIB
-  image_path      TEXT                       -- PATH poster hasil chatgpt);
+  image_path      TEXT                       -- PATH poster hasil chatgpt
+);
 
 -- Vector store (RAG). Local-first: embedding disimpan sebagai JSON float[].
 -- Setiap chunk membawa metadata untuk grounding + filter wilayah.

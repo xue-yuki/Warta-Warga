@@ -33,7 +33,8 @@ Prinsip PRD yang ditegakkan kode:
 npm install
 cp .env.example .env      # isi OPENROUTER_API_KEY bila ingin jawaban full-LLM
 npm run seed              # isi KB dengan data sintetis (jalan tanpa API key)
-npm run demo              # uji Agent 2 di terminal (tanpa WhatsApp) npm run bot               # nyalakan bot → scan QR di WhatsApp ```
+npm run demo              # uji Agent 2 di terminal (tanpa WhatsApp) 
+npm run bot               # nyalakan bot → scan QR di WhatsApp ```
 
 > Tanpa `OPENROUTER_API_KEY`, bot tetap jalan dengan **mode fallback** (klasifikasi heuristik + jawaban ekstraktif + klaim konservatif ⚠️). Untuk RAG/klaim penuh, isi key.
 > Embeddings default `local` (Xenova/all-MiniLM-L6-v2, unduh ~25MB sekali). Set `EMBEDDINGS_PROVIDER=hashing` untuk mode tanpa unduh.
