@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   cara_daftar     TEXT,
   wilayah_tag     TEXT NOT NULL,             -- F1.3 WAJIB
   sumber_url      TEXT NOT NULL,             -- F1.2 WAJIB
-  tanggal_ambil   TEXT NOT NULL              -- F1.2 WAJIB
-);
+  tanggal_ambil   TEXT NOT NULL,             -- F1.2 WAJIB
+  image_path      TEXT                       -- PATH poster hasil chatgpt);
 
 -- Vector store (RAG). Local-first: embedding disimpan sebagai JSON float[].
 -- Setiap chunk membawa metadata untuk grounding + filter wilayah.
@@ -74,6 +74,36 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   wilayah_tag  TEXT,
   grup_count   INTEGER,
   timestamp    TEXT NOT NULL
+);
+
+-- Laporan layanan publik / aduan per platform (contoh: LaporGub).
+CREATE TABLE IF NOT EXISTS laporan_layanan (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  kategori        TEXT NOT NULL,
+  deskripsi       TEXT NOT NULL,
+  lokasi_detail   TEXT NOT NULL,
+  wilayah_tag     TEXT,
+  foto_path       TEXT,
+  foto_ocr        TEXT,
+  portal_target   TEXT NOT NULL DEFAULT 'laporgub',
+  status          TEXT NOT NULL DEFAULT 'draft',
+  nomor_ticket    TEXT,
+  message_id      TEXT,
+  session_id      TEXT,
+  timestamp       TEXT NOT NULL,
+  submitted_at    TEXT,
+  last_status_check TEXT,
+  notes           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS laporan_layanan_submit_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  laporan_id  INTEGER REFERENCES laporan_layanan(id) ON DELETE CASCADE,
+  portal      TEXT NOT NULL,
+  attempt     INTEGER NOT NULL,
+  status      TEXT NOT NULL,
+  error_msg   TEXT,
+  timestamp   TEXT NOT NULL
 );
 
 -- Log interaksi ANONIM — hanya untuk tren kebutuhan, tanpa identitas pribadi

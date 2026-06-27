@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   cara_daftar     TEXT,
   wilayah_tag     TEXT NOT NULL,
   sumber_url      TEXT NOT NULL,
-  tanggal_ambil   TEXT NOT NULL
+  tanggal_ambil   TEXT NOT NULL,
+  image_path      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS kb_chunks (
@@ -64,6 +65,35 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   laporan_id  INTEGER REFERENCES laporan(id) ON DELETE CASCADE,
   wilayah_tag TEXT,
   grup_count  INTEGER,
+  timestamp   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS laporan_layanan (
+  id               SERIAL PRIMARY KEY,
+  kategori         TEXT NOT NULL,
+  deskripsi        TEXT NOT NULL,
+  lokasi_detail    TEXT NOT NULL,
+  wilayah_tag      TEXT,
+  foto_path        TEXT,
+  foto_ocr         TEXT,
+  portal_target    TEXT NOT NULL DEFAULT 'laporgub',
+  status           TEXT NOT NULL DEFAULT 'draft',
+  nomor_ticket     TEXT,
+  message_id       TEXT,
+  session_id       TEXT,
+  timestamp        TEXT NOT NULL,
+  submitted_at     TEXT,
+  last_status_check TEXT,
+  notes            TEXT
+);
+
+CREATE TABLE IF NOT EXISTS laporan_layanan_submit_log (
+  id          SERIAL PRIMARY KEY,
+  laporan_id  INTEGER REFERENCES laporan_layanan(id) ON DELETE CASCADE,
+  portal      TEXT NOT NULL,
+  attempt     INTEGER NOT NULL,
+  status      TEXT NOT NULL,
+  error_msg   TEXT,
   timestamp   TEXT NOT NULL
 );
 

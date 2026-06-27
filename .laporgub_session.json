@@ -1,0 +1,25 @@
+{
+  "cookies": [
+    {
+      "name": "XSRF-TOKEN",
+      "value": "eyJpdiI6IllGSzlPbmorMGZMOERsWjVWZVpqd2c9PSIsInZhbHVlIjoiYThkdjlCZ2hhUDNrRWRacmhSRkxRVkZOV0U0L1ltKzhIdVFCU3U4M2RvU0ZoTjFaRFp2b1lhRFhRZWgyNHI5U2s5ZE1KWGM1MkRHUFBVQUU0L2dQTVpOTHNIUFJObFU1RG85VjZzT1FQcGJqS1pySDdLejVBVnVCSndjV0M3SHAiLCJtYWMiOiJlNzYzZWE5OTEyMjRkZTgyYjZiMGQzYjdhMzNjZWNmOGY3ZDhlNmQ1MGFjNmU1YTk1M2VhMWNhZGUwNmM1YTExIiwidGFnIjoiIn0%3D",
+      "domain": "laporgub.jatengprov.go.id",
+      "path": "/",
+      "expires": 1783185307.802564,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "laporgub_session",
+      "value": "eyJpdiI6IitOcXhVZm94OUJrWTZUODU3YmFPcVE9PSIsInZhbHVlIjoicHMzS3BQSlVrVmdSN2d3L3Z4d0pUQXg1TGI0ekMrdnByeGhxSWhXVHdQT1o3TTVsNWNIU01rRHV4dnJUQVdQU0gwMjNrWmpNMVZPcGZ6cXlZc0sycEQ3STBEWXQ0MjZBYzc0YkVTQVZaTkoxTlNKUWEwdUVWNEZ5VTl4bzBMMXMiLCJtYWMiOiIxMzU0MDFhMmIwMDI0NGU1NmFiMzBjYzg3NDA3OTE0M2ZkMDk5MDc0MGM2ZDY1YjllNWEwMmE4YzRlYzg1N2ZjIiwidGFnIjoiIn0%3D",
+      "domain": "laporgub.jatengprov.go.id",
+      "path": "/",
+      "expires": 1783185307.802737,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

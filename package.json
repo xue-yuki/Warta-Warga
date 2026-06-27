@@ -20,6 +20,7 @@
     "test:checkurl": "node scripts/test-checkurl.js",
     "test:vision": "node scripts/test-vision.js",
     "dashboard:demo": "node scripts/dashboard.js",
+    "check:laporgub": "node scripts/check-laporgub.js",
     "migrate:supabase": "node scripts/migrate-to-supabase.js"
   },
   "dependencies": {
