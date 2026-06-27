@@ -1,10 +1,10 @@
-import fs from 'node:fs';
 import { config, hasLLM, hasSearch } from '../config.js';
 import { ingestUrl } from './index.js';
 import { extractLinks } from './fetch.js';
 import { searchOfficialSources } from './search.js';
 import { broadcastNewInfos } from './broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
+import { listSumberCrawl } from '../db/index.js';
 
 // Auto-scrape Agent 1: pindai daftar sumber resmi (data/sources.json) secara berkala,
 // strukturkan via LLM, lalu segarkan Knowledge Base. Re-scrape = REFRESH (dedup by sumber_url).
@@ -12,15 +12,13 @@ import { humanWilayah } from '../util/wilayah.js';
 let _timer = null;
 let _running = false;
 
-/** Baca daftar sumber. Tiap entri: "url" string atau { url, wilayah }. */
-export function loadSources() {
-  const p = config.scrape.sourcesPath;
-  if (!fs.existsSync(p)) return [];
+/** Baca daftar sumber dari DB (menggantikan sources.json). */
+export async function loadSources() {
   try {
-    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return (raw.sources || []).map((s) => (typeof s === 'string' ? { url: s } : s)).filter((s) => s.url);
+    const rows = await listSumberCrawl();
+    return rows.map((r) => ({ url: r.url, wilayah: r.wilayah || undefined, crawl: Boolean(r.crawl) }));
   } catch (e) {
-    console.warn('[Agent1] Gagal baca sources.json:', e.message);
+    console.warn('[Agent1] Gagal baca sumber_crawl dari DB:', e.message);
     return [];
   }
 }
@@ -38,9 +36,9 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
     console.warn('[Agent1] Auto-scrape butuh OPENROUTER_API_KEY — dilewati.');
     return { total: 0, ok: 0, skip: 0 };
   }
-  const sources = loadSources();
+  const sources = await loadSources();
   if (sources.length === 0) {
-    console.log('[Agent1] data/sources.json kosong — tidak ada yang dipindai.');
+    console.log('[Agent1] Tabel sumber_crawl kosong — tidak ada yang dipindai.');
     return { total: 0, ok: 0, skip: 0 };
   }
 

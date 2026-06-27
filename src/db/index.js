@@ -26,6 +26,7 @@ function sqliteDb() {
   _sqlite.pragma('foreign_keys = ON');
   _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   ensureColumn(_sqlite, 'info_bansos', 'batas_daftar', 'TEXT');
+  ensureColumn(_sqlite, 'info_bansos', 'image_id', 'TEXT');
   ensureColumn(_sqlite, 'info_bansos', 'image_path', 'TEXT');
   ensureColumn(_sqlite, 'kb_chunks', 'batas_daftar', 'TEXT');
   ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
@@ -45,6 +46,7 @@ async function pgInit() {
   const ddl = fs.readFileSync(path.join(__dirname, "schema.pg.sql"), "utf8");
   await _pg.unsafe(ddl); // idempoten (CREATE IF NOT EXISTS)
   try {
+    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_id TEXT`;
     await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
   } catch (err) {
     /* ignore if column exists or alter not supported */
@@ -61,10 +63,47 @@ async function pgInit() {
 export async function initDb() {
   if (!hasSupabase()) {
     sqliteDb();
+    await _seedTablesIfEmpty();
     return;
   }
   if (!_pgReady) _pgReady = pgInit();
   await _pgReady;
+  await _seedTablesIfEmpty();
+}
+
+/** Seed sources_whitelist & sumber_crawl dari JSON jika tabel masih kosong (migrasi awal). */
+async function _seedTablesIfEmpty() {
+  const wlCount = hasSupabase()
+    ? (await _pg`SELECT COUNT(*)::int AS n FROM sources_whitelist`)[0].n
+    : sq().prepare('SELECT COUNT(*) AS n FROM sources_whitelist').get().n;
+  if (wlCount === 0) {
+    const wlPath = path.join(__dirname, '../../data/sources_whitelist.json');
+    if (fs.existsSync(wlPath)) {
+      const { allowedHostPatterns = [] } = JSON.parse(fs.readFileSync(wlPath, 'utf8'));
+      for (const p of allowedHostPatterns) {
+        if (hasSupabase()) await _pg`INSERT INTO sources_whitelist (pattern) VALUES (${p}) ON CONFLICT (pattern) DO NOTHING`;
+        else sq().prepare('INSERT OR IGNORE INTO sources_whitelist (pattern) VALUES (?)').run(p);
+      }
+      if (allowedHostPatterns.length) console.log(`[DB] Seed sources_whitelist: ${allowedHostPatterns.length} pola dari JSON.`);
+    }
+  }
+  const srcCount = hasSupabase()
+    ? (await _pg`SELECT COUNT(*)::int AS n FROM sumber_crawl`)[0].n
+    : sq().prepare('SELECT COUNT(*) AS n FROM sumber_crawl').get().n;
+  if (srcCount === 0) {
+    const srcPath = path.join(__dirname, '../../data/sources.json');
+    if (fs.existsSync(srcPath)) {
+      const { sources = [] } = JSON.parse(fs.readFileSync(srcPath, 'utf8'));
+      for (const s of sources) {
+        const e = typeof s === 'string' ? { url: s } : s;
+        if (!e.url) continue;
+        const c = e.crawl ? 1 : 0;
+        if (hasSupabase()) await _pg`INSERT INTO sumber_crawl (url, wilayah, crawl) VALUES (${e.url}, ${e.wilayah || null}, ${c}) ON CONFLICT (url) DO NOTHING`;
+        else sq().prepare('INSERT OR IGNORE INTO sumber_crawl (url, wilayah, crawl) VALUES (?, ?, ?)').run(e.url, e.wilayah || null, c);
+      }
+      if (sources.length) console.log(`[DB] Seed sumber_crawl: ${sources.length} sumber dari JSON.`);
+    }
+  }
 }
 
 /** Akses langsung SQLite (hanya backend SQLite — untuk script admin raw-SQL). */
@@ -122,16 +161,17 @@ export async function insertInfoBansos(info) {
   await initDb();
   if (hasSupabase()) {
     const [row] = await _pg`
-      INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_path)
+      INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_id, image_path)
       VALUES (${info.program}, ${info.ringkasan}, ${_pg.json(info.syarat || [])}, ${info.tanggal_penting || null},
-              ${info.batas_daftar || null}, ${info.cara_daftar || null}, ${info.wilayah_tag}, ${info.sumber_url}, ${info.tanggal_ambil}, ${info.image_path || null})
+              ${info.batas_daftar || null}, ${info.cara_daftar || null}, ${info.wilayah_tag}, ${info.sumber_url}, ${info.tanggal_ambil},
+              ${info.image_id || null}, ${info.image_path || null})
       RETURNING id`;
     return row.id;
   }
   return sq()
     .prepare(
-      `INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_path)
-       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil, @image_path)`,
+      `INSERT INTO info_bansos (program, ringkasan, syarat, tanggal_penting, batas_daftar, cara_daftar, wilayah_tag, sumber_url, tanggal_ambil, image_id, image_path)
+       VALUES (@program, @ringkasan, @syarat, @tanggal_penting, @batas_daftar, @cara_daftar, @wilayah_tag, @sumber_url, @tanggal_ambil, @image_id, @image_path)`,
     )
     .run({
       program: info.program,
@@ -143,8 +183,23 @@ export async function insertInfoBansos(info) {
       wilayah_tag: info.wilayah_tag,
       sumber_url: info.sumber_url,
       tanggal_ambil: info.tanggal_ambil,
+      image_id: info.image_id || null,
       image_path: info.image_path || null,
     }).lastInsertRowid;
+}
+
+export async function updateInfoBansosImage(id, { imageId, imagePath }) {
+  await initDb();
+  if (hasSupabase()) {
+    await _pg`
+      UPDATE info_bansos
+      SET image_id = ${imageId || null}, image_path = ${imagePath || null}
+      WHERE id = ${id}`;
+    return;
+  }
+  sq()
+    .prepare('UPDATE info_bansos SET image_id = ?, image_path = ? WHERE id = ?')
+    .run(imageId || null, imagePath || null, id);
 }
 
 export async function countInfoBansos() {
@@ -515,4 +570,54 @@ export async function countChunks() {
   await initDb();
   if (hasSupabase()) return (await _pg`SELECT COUNT(*)::int AS n FROM kb_chunks`)[0].n;
   return sq().prepare("SELECT COUNT(*) AS n FROM kb_chunks").get().n;
+}
+
+// ---------- sources_whitelist ----------
+
+export async function listWhitelistPatterns() {
+  await initDb();
+  if (hasSupabase()) return [...(await _pg`SELECT id, pattern FROM sources_whitelist WHERE aktif = 1 ORDER BY id`)];
+  return sq().prepare('SELECT id, pattern FROM sources_whitelist WHERE aktif = 1 ORDER BY id').all();
+}
+
+export async function upsertWhitelistPattern(pattern) {
+  await initDb();
+  if (hasSupabase()) {
+    await _pg`INSERT INTO sources_whitelist (pattern) VALUES (${pattern}) ON CONFLICT (pattern) DO UPDATE SET aktif = 1`;
+  } else {
+    sq().prepare('INSERT OR REPLACE INTO sources_whitelist (pattern, aktif) VALUES (?, 1)').run(pattern);
+  }
+}
+
+export async function deleteWhitelistPattern(id) {
+  await initDb();
+  if (hasSupabase()) await _pg`DELETE FROM sources_whitelist WHERE id = ${id}`;
+  else sq().prepare('DELETE FROM sources_whitelist WHERE id = ?').run(id);
+}
+
+// ---------- sumber_crawl ----------
+
+export async function listSumberCrawl() {
+  await initDb();
+  if (hasSupabase()) return [...(await _pg`SELECT * FROM sumber_crawl WHERE aktif = 1 ORDER BY id`)];
+  return sq().prepare('SELECT * FROM sumber_crawl WHERE aktif = 1 ORDER BY id').all();
+}
+
+export async function upsertSumberCrawl({ url, wilayah, crawl = false }) {
+  await initDb();
+  const c = crawl ? 1 : 0;
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO sumber_crawl (url, wilayah, crawl)
+      VALUES (${url}, ${wilayah || null}, ${c})
+      ON CONFLICT (url) DO UPDATE SET wilayah = EXCLUDED.wilayah, crawl = EXCLUDED.crawl, aktif = 1`;
+  } else {
+    sq().prepare('INSERT OR REPLACE INTO sumber_crawl (url, wilayah, crawl, aktif) VALUES (?, ?, ?, 1)').run(url, wilayah || null, c);
+  }
+}
+
+export async function deleteSumberCrawl(id) {
+  await initDb();
+  if (hasSupabase()) await _pg`DELETE FROM sumber_crawl WHERE id = ${id}`;
+  else sq().prepare('DELETE FROM sumber_crawl WHERE id = ?').run(id);
 }

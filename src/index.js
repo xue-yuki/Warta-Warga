@@ -4,9 +4,11 @@ import { startBot } from "./wa/bot.js";
 import { startAutoScrape } from "./agent1/scheduler.js";
 import { startDashboard } from "./dashboard/server.js";
 import { startLaporgubChecker } from "./agent2/laporgub-checker.js";
+import { initWhitelistCache } from './agent1/fetch.js';
 
 async function main() {
   await initDb(); // init skema (SQLite atau Postgres/Supabase)
+  await initWhitelistCache(); // pre-load whitelist dari DB sebelum request pertama
   console.log("🏘️  Warta Warga — Asisten Info Bansos + Anti-Hoaks");
   console.log(`   Penyimpanan: ${hasSupabase() ? "Supabase (Postgres)" : "SQLite lokal"}`);
   const nChunks = await countChunks();

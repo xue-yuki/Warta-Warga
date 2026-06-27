@@ -109,7 +109,7 @@ export async function searchOfficialSources(query, { limit = 4 } = {}) {
   const seen = new Set();
   const out = [];
   for (const u of urls) {
-    if (!isWhitelisted(u)) continue; // hanya sumber resmi .go.id
+    if (!(await isWhitelisted(u))) continue; // hanya sumber resmi .go.id
     const norm = u.split('#')[0];
     if (seen.has(norm)) continue;
     seen.add(norm);

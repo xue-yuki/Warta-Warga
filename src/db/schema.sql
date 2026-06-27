@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   wilayah_tag     TEXT NOT NULL,             -- F1.3 WAJIB
   sumber_url      TEXT NOT NULL,             -- F1.2 WAJIB
   tanggal_ambil   TEXT NOT NULL,             -- F1.2 WAJIB
-  image_path      TEXT                       -- PATH poster hasil chatgpt
+  image_id        TEXT,                       -- stable asset id: info_<info_bansos.id>
+  image_path      TEXT                        -- PATH poster hasil chatgpt
 );
 
 -- Vector store (RAG). Local-first: embedding disimpan sebagai JSON float[].
@@ -75,6 +76,24 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   wilayah_tag  TEXT,
   grup_count   INTEGER,
   timestamp    TEXT NOT NULL
+);
+
+-- Pola regex host yang diizinkan Agent 1 (menggantikan data/sources_whitelist.json).
+-- Dikelola dinamis via dashboard/website.
+CREATE TABLE IF NOT EXISTS sources_whitelist (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern TEXT NOT NULL UNIQUE,
+  aktif   INTEGER NOT NULL DEFAULT 1
+);
+
+-- Daftar URL yang dipindai otomatis Agent 1 (menggantikan data/sources.json).
+-- Dikelola dinamis via dashboard/website.
+CREATE TABLE IF NOT EXISTS sumber_crawl (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  url     TEXT NOT NULL UNIQUE,
+  wilayah TEXT,
+  crawl   INTEGER NOT NULL DEFAULT 0,
+  aktif   INTEGER NOT NULL DEFAULT 1
 );
 
 -- Laporan layanan publik / aduan per platform (contoh: LaporGub).

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   wilayah_tag     TEXT NOT NULL,
   sumber_url      TEXT NOT NULL,
   tanggal_ambil   TEXT NOT NULL,
+  image_id        TEXT,
   image_path      TEXT
 );
 
@@ -66,6 +67,20 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   wilayah_tag TEXT,
   grup_count  INTEGER,
   timestamp   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sources_whitelist (
+  id      SERIAL PRIMARY KEY,
+  pattern TEXT NOT NULL UNIQUE,
+  aktif   SMALLINT NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS sumber_crawl (
+  id      SERIAL PRIMARY KEY,
+  url     TEXT NOT NULL UNIQUE,
+  wilayah TEXT,
+  crawl   SMALLINT NOT NULL DEFAULT 0,
+  aktif   SMALLINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS laporan_layanan (

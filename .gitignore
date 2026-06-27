@@ -1,7 +1,7 @@
 node_modules/
 .env
 *.log
-
+.agents
 # Baileys auth state (berisi kredensial sesi WA — JANGAN commit)
 auth_state/
 auth_info*/

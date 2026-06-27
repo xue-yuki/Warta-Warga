@@ -75,11 +75,11 @@ const extOf = (u) => {
 };
 
 /** Sinyal domain (tak butuh body) → tetap berguna walau situs tak terjangkau. */
-function domainInfo(url) {
+async function domainInfo(url) {
   try {
     const u = new URL(url);
     const host = u.hostname;
-    const is_official_gov = isWhitelisted(url);
+    const is_official_gov = await isWhitelisted(url);
     return {
       host,
       tld: host.split('.').slice(-1)[0],
@@ -118,9 +118,9 @@ export async function inspectUrl(rawUrl) {
     } catch (err) {
       // Body kelewat besar → kemungkinan file unduhan besar (mis. .apk).
       if (err?.code === 'ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED' || /maxContentLength|maxBodyLength/i.test(err?.message || '')) {
-        return finalize({ input_url, final_url: current, redirect_chain, headers: {}, body: null, forcedDownload: true });
+        return await finalize({ input_url, final_url: current, redirect_chain, headers: {}, body: null, forcedDownload: true });
       }
-      return augment({ ok: false, unreachable: true, error: err?.code || err?.message || 'gagal terhubung', input_url, final_url: current, redirect_chain, ...domainInfo(current) });
+      return augment({ ok: false, unreachable: true, error: err?.code || err?.message || 'gagal terhubung', input_url, final_url: current, redirect_chain, ...(await domainInfo(current)) });
     }
     const status = res.status;
     const loc = res.headers?.location;
@@ -142,14 +142,14 @@ export async function inspectUrl(rawUrl) {
     finalRes = res;
     break;
   }
-  if (!finalRes) return augment({ ok: false, unreachable: true, error: 'Terlalu banyak pengalihan.', input_url, final_url: current, redirect_chain, ...domainInfo(current) });
+  if (!finalRes) return augment({ ok: false, unreachable: true, error: 'Terlalu banyak pengalihan.', input_url, final_url: current, redirect_chain, ...(await domainInfo(current)) });
 
-  return augment(finalize({ input_url, final_url: current, redirect_chain, headers: finalRes.headers || {}, body: finalRes.data }));
+  return augment(await finalize({ input_url, final_url: current, redirect_chain, headers: finalRes.headers || {}, body: finalRes.data }));
 }
 
 /** Susun sinyal akhir dari response final. */
-function finalize({ input_url, final_url, redirect_chain, headers, body, forcedDownload = false }) {
-  const dom = domainInfo(final_url);
+async function finalize({ input_url, final_url, redirect_chain, headers, body, forcedDownload = false }) {
+  const dom = await domainInfo(final_url);
   const ct = String(headers['content-type'] || '').toLowerCase();
   const cd = String(headers['content-disposition'] || '').toLowerCase();
   const is_download = forcedDownload || DL_CT.test(ct) || cd.includes('attachment') || DL_EXT.test(extOf(final_url));
@@ -236,7 +236,7 @@ async function augment(result) {
   const html = await renderViaBrightData(result.final_url);
   // Render dicoba tapi gagal (timeout/anti-bot) → tandai: situs menyulitkan pemeriksaan = sinyal curiga.
   if (!html) return { ...result, render_diblokir: true };
-  const merged = finalize({
+  const merged = await finalize({
     input_url: result.input_url,
     final_url: result.final_url,
     redirect_chain: result.redirect_chain || [],

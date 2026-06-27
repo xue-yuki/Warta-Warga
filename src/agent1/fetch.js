@@ -2,16 +2,33 @@ import fs from 'node:fs';
 import path from 'node:path';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { ROOT, hasBrightDataUnlocker } from '../config.js';
+import { hasBrightDataUnlocker } from '../config.js';
 import { bdUnlock } from './brightdata.js';
 import { hasBrowser, browserFetch, localFetch } from './browser.js';
+import { listWhitelistPatterns } from '../db/index.js';
 
-let _whitelist = null;
-function whitelist() {
-  if (_whitelist) return _whitelist;
-  const raw = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'sources_whitelist.json'), 'utf8'));
-  _whitelist = (raw.allowedHostPatterns || []).map((p) => new RegExp(p, 'i'));
-  return _whitelist;
+// In-memory cache untuk whitelist; refresh dari DB tiap 60 detik.
+let _whitelistCache = null;
+let _whitelistExpires = 0;
+const WHITELIST_TTL = 60_000;
+
+async function getWhitelist() {
+  const now = Date.now();
+  if (_whitelistCache && now < _whitelistExpires) return _whitelistCache;
+  const rows = await listWhitelistPatterns();
+  _whitelistCache = rows.map((r) => new RegExp(r.pattern, 'i'));
+  _whitelistExpires = now + WHITELIST_TTL;
+  return _whitelistCache;
+}
+
+/** Panggil saat startup agar cache terisi sebelum request pertama. */
+export async function initWhitelistCache() {
+  await getWhitelist();
+}
+
+/** Paksa refresh cache (berguna setelah update whitelist via dashboard). */
+export function invalidateWhitelistCache() {
+  _whitelistExpires = 0;
 }
 
 function safeHost(url) {
@@ -23,14 +40,15 @@ function safeHost(url) {
 }
 
 /** F1.1: hanya host yang cocok whitelist yang boleh diproses. */
-export function isWhitelisted(url) {
+export async function isWhitelisted(url) {
   let host;
   try {
     host = new URL(url).hostname;
   } catch {
     return false;
   }
-  return whitelist().some((re) => re.test(host));
+  const patterns = await getWhitelist();
+  return patterns.some((re) => re.test(host));
 }
 
 /**
@@ -38,7 +56,7 @@ export function isWhitelisted(url) {
  * @returns {Promise<{ok:boolean, text?:string, title?:string, error?:string}>}
  */
 export async function fetchAndParse(url) {
-  if (!isWhitelisted(url)) {
+  if (!(await isWhitelisted(url))) {
     return { ok: false, error: `URL di luar whitelist sumber resmi: ${url}` };
   }
 
@@ -98,7 +116,7 @@ const FILE_EXT = /\.(pdf|jpe?g|png|gif|webp|svg|zip|rar|docx?|xlsx?|pptx?|mp4)$/
  * @returns {Promise<string[]>}
  */
 export async function extractLinks(url) {
-  if (!isWhitelisted(url)) return [];
+  if (!(await isWhitelisted(url))) return [];
   let html = null;
   try {
     const res = await axios.get(url, { timeout: 20000, maxRedirects: 5, headers: { 'User-Agent': 'WartaWargaBot/0.1 (+sumber-resmi)' } });

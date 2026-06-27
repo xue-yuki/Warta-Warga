@@ -1,6 +1,6 @@
 import { fetchAndParse, readLocalDoc, isWhitelisted } from './fetch.js';
 import { structureContent } from './structure.js';
-import { insertInfoBansos, deleteInfoBySource } from '../db/index.js';
+import { insertInfoBansos, updateInfoBansosImage, deleteInfoBySource } from '../db/index.js';
 import { indexInfo } from '../kb/vectorStore.js';
 import { normalizeWilayahTag } from '../util/wilayah.js';
 import { generateAndSavePoster } from '../llm/imageGen.js';
@@ -10,7 +10,7 @@ import { generateAndSavePoster } from '../llm/imageGen.js';
  * Requirement: F1.1 whitelist, F1.2 sumber_url+tanggal_ambil, F1.3 wilayah_tag, F1.4 skip bila gagal.
  */
 export async function ingestUrl(url, { hintWilayah, refresh = false } = {}) {
-  if (!isWhitelisted(url)) {
+  if (!(await isWhitelisted(url))) {
     return { ok: false, url, error: 'URL bukan sumber resmi terkurasi (whitelist).' };
   }
   const fetched = await fetchAndParse(url);
@@ -59,18 +59,22 @@ export async function storeStructured(info) {
   if (!record.sumber_url) return { ok: false, error: 'sumber_url wajib (F1.2).' };
   if (!record.program || !record.ringkasan) return { ok: false, error: 'program & ringkasan wajib.' };
 
-  // Generate visual poster using ChatGPT
+  const id = await insertInfoBansos({ ...record, image_id: null, image_path: null });
+
+  // Generate after insert so the poster asset is tied to the exact info_bansos.id.
+  record.id = id;
+  record.image_id = `info_${id}`;
   let imagePath = null;
   try {
-    imagePath = await generateAndSavePoster(record);
+    imagePath = await generateAndSavePoster(record, { imageId: record.image_id });
   } catch (err) {
     console.error(`[Agent1] Failed to generate poster image: ${err.message}`);
   }
   record.image_path = imagePath;
+  await updateInfoBansosImage(id, { imageId: record.image_id, imagePath });
 
-  const id = await insertInfoBansos(record);
   const nChunks = await indexInfo(id, record);
   console.log(`[Agent1] OK  ${record.program} (${record.wilayah_tag}) → id=${id}, ${nChunks} chunk`);
   // `record` dikembalikan utuh agar pemanggil (scheduler) bisa broadcast info baru ke grup.
-  return { ok: true, id, program: record.program, wilayah_tag: record.wilayah_tag, chunks: nChunks, record: { id, ...record } };
+  return { ok: true, id, program: record.program, wilayah_tag: record.wilayah_tag, chunks: nChunks, record };
 }
