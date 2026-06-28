@@ -241,7 +241,7 @@ export async function runLaporgubCheckerOnce() {
   }
   _running = true;
   try {
-    const reports = await listSubmittedLaporanLayanan();
+    const reports = await listSubmittedLaporanLayanan({ portalTarget: "laporgub" });
     console.log(`[laporgub-checker] mengecek ${reports.length} laporan submitted`);
     for (const lap of reports) {
       try {

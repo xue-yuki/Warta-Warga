@@ -172,7 +172,7 @@ async function main() {
       return;
     }
 
-    const reports = await listSubmittedLaporanLayanan();
+    const reports = await listSubmittedLaporanLayanan({ portalTarget: "laporgub" });
     console.log(`[check-laporgub] ${reports.length} submitted laporan_layanan to check`);
     for (const lap of reports) {
       const rawTicket = String(lap.nomor_ticket || "").trim();

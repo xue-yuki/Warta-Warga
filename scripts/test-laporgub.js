@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { config } from "../src/config.js";
-import { solveCaptchaImage } from "../src/agent2/captcha.js";
+import { getCaptchaSolverProviders, solveCaptchaImage } from "../src/agent2/captcha.js";
 import { solveCaptcha } from "../src/portal/laporgub.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -68,8 +68,11 @@ async function loginTest() {
       const captchaInput = page.locator('input[name="captcha"], #captcha');
       await captchaInput.waitFor({ state: "visible", timeout: 15000 });
 
-      if (process.env.VISION_API_KEY || process.env.VISION_API) {
-        console.log(`VISION API enabled: endpoint=${process.env.VISION_BASE_URL || process.env.LLM_BASE_URL || config.vision.baseUrl} model=${process.env.VISION_MODEL || process.env.OPENROUTER_FAST_MODEL || config.vision.model}`);
+      const captchaProviders = getCaptchaSolverProviders();
+      if (captchaProviders.length) {
+        console.log(
+          `Captcha OCR enabled: ${captchaProviders.map((provider) => `${provider.name}:${provider.model}`).join(", ")}`,
+        );
         try {
           const screenshot = await captchaImg.first().screenshot();
           const solved = await solveCaptchaImage(screenshot, "image/png");
@@ -128,8 +131,8 @@ async function captchaTest() {
     const screenshotPath = path.join(SCREENSHOT_DIR, "captcha.png");
     await captcha.screenshot({ path: screenshotPath });
     console.log(`Captcha screenshot saved: ${screenshotPath}`);
-    if (!process.env.VISION_API_KEY) {
-      console.log("No VISION_API_KEY set; this script only captures the captcha image.");
+    if (!getCaptchaSolverProviders().length) {
+      console.log("No captcha OCR provider set; this script only captures the captcha image.");
     }
   } finally {
     await browser.close();

@@ -34,6 +34,27 @@ export const config = {
     checkIntervalHours: Number(process.env.LAPORGUB_CHECK_INTERVAL_HOURS || 6),
   },
 
+  aduankonten: {
+    baseUrl: process.env.ADUANKONTEN_BASE_URL || "https://aduankonten.id",
+    sessionPath: abs(process.env.ADUANKONTEN_SESSION_PATH || "./.aduankonten_session.json"),
+    userDataDir: abs(process.env.ADUANKONTEN_USER_DATA_DIR || "./.aduankonten_profile"),
+    debugDir: process.env.ADUANKONTEN_DEBUG_DIR ? abs(process.env.ADUANKONTEN_DEBUG_DIR) : "",
+    userAgent: process.env.ADUANKONTEN_USER_AGENT || "",
+    browserChannel: process.env.ADUANKONTEN_BROWSER_CHANNEL || "",
+    checkIntervalHours: Number(process.env.ADUANKONTEN_CHECK_INTERVAL_HOURS || 6),
+  },
+
+  cloudflareCaptcha: {
+    enabled: (process.env.CLOUDFLARE_CAPTCHA_SOLVER ?? "true") !== "false",
+    provider: process.env.CLOUDFLARE_CAPTCHA_PROVIDER || "gemini", // gemini or openrouter
+    geminiApiKey: process.env.CLOUDFLARE_GEMINI_API_KEY || process.env.VISION_API_KEY || "",
+    geminiModel: process.env.CLOUDFLARE_GEMINI_MODEL || "gemini-flash-lite-latest",
+    openrouterApiKey: process.env.CLOUDFLARE_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || "",
+    openrouterModel: process.env.CLOUDFLARE_OPENROUTER_MODEL || "google/gemini-flash-1.5",
+    maxRetries: Number(process.env.CLOUDFLARE_CAPTCHA_MAX_RETRIES || "3"),
+    challengeTimeoutMs: Number(process.env.CLOUDFLARE_CAPTCHA_TIMEOUT_MS || "60000"),
+  },
+
   // Persistensi: bila SUPABASE_DB_URL diset → backend Postgres (Supabase, deploy); kosong → SQLite lokal.
   // Ambil connection string dari Supabase Dashboard → Settings → Database → Connection string (pooler).
   supabase: {
@@ -113,6 +134,7 @@ export const config = {
 export const hasLLM = () => Boolean(config.openrouter.apiKey);
 export const hasVision = () => Boolean(config.vision.apiKey);
 export const hasLaporGub = () => Boolean(config.laporgub.email && config.laporgub.password);
+export const hasAduanKonten = () => Boolean(config.aduankonten.baseUrl);
 export const hasSupabase = () => Boolean(config.supabase.dbUrl);
 export const hasSearch = () => {
   const s = config.search;

@@ -5,8 +5,11 @@ import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, Disconn
 import { config, hasSearch, hasVision } from "../config.js";
 import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
+import { handleLaporKonten } from "../agent2/lapor-konten.js";
 import { handleLaporLayanan } from "../agent2/lapor-layanan.js";
+import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
+import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
 import { describeImage } from "../agent2/vision.js";
 import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah } from "../util/wilayah.js";
 import { scrapeRegion } from "../agent1/scheduler.js";
@@ -168,6 +171,8 @@ export async function startBot() {
       
             // Daftarkan pengirim notifikasi LaporGub agar follow-up bisa dikirim ke pelapor.
       setLaporgubNotifier((jid, text) => sock.sendMessage(jid, { text }));
+      setAduanKontenNotifier((jid, text) => sock.sendMessage(jid, { text }));
+      startAgent2ServiceCheckers();
     }
     if (connection === "close") {
       if (closedHandled) return;
@@ -175,6 +180,7 @@ export async function startBot() {
       _connecting = false;
       setBroadcaster(null); // sock mati → jangan broadcast lewat koneksi basi; daftar ulang saat 'open'.
       setLaporgubNotifier(null);
+      setAduanKontenNotifier(null);
       const code = lastDisconnect?.error?.output?.statusCode;
 
       if (code === DisconnectReason.loggedOut) {
@@ -333,6 +339,12 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
 
   // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
   // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
+  const kontenResult = await handleLaporKonten({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+  if (kontenResult?.reply) {
+    await send(kontenResult.reply);
+    return;
+  }
+
   const reportResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
   if (reportResult?.reply) {
     await send(reportResult.reply);

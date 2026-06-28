@@ -469,9 +469,17 @@ export async function listPendingLaporanLayanan() {
   return sq().prepare(`SELECT * FROM laporan_layanan WHERE status IN ('draft','confirmed','failed') ORDER BY timestamp ASC`).all();
 }
 
-export async function listSubmittedLaporanLayanan() {
+export async function listSubmittedLaporanLayanan({ portalTarget = null } = {}) {
   await initDb();
-  if (hasSupabase()) return [...(await _pg`SELECT * FROM laporan_layanan WHERE status = 'submitted' ORDER BY timestamp ASC`)];
+  if (hasSupabase()) {
+    if (portalTarget) {
+      return [...(await _pg`SELECT * FROM laporan_layanan WHERE status = 'submitted' AND portal_target = ${portalTarget} ORDER BY timestamp ASC`)];
+    }
+    return [...(await _pg`SELECT * FROM laporan_layanan WHERE status = 'submitted' ORDER BY timestamp ASC`)];
+  }
+  if (portalTarget) {
+    return sq().prepare(`SELECT * FROM laporan_layanan WHERE status = 'submitted' AND portal_target = ? ORDER BY timestamp ASC`).all(portalTarget);
+  }
   return sq().prepare(`SELECT * FROM laporan_layanan WHERE status = 'submitted' ORDER BY timestamp ASC`).all();
 }
 

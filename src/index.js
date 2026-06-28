@@ -22,7 +22,6 @@ async function main() {
 
   console.log("\nMenyalakan WhatsApp bot...\n");
   await startBot();
-  // startLaporgubChecker();
 }
 
 main().catch((err) => {

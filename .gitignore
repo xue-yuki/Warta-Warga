@@ -1,6 +1,12 @@
 node_modules/
 .env
 *.log
+.aduankonten_session.json
+.aduankonten_profile/
+debug/
+.claude/
+aduankontenid.txt
+main_captcha_solver_rotate.js
 .agents
 # Baileys auth state (berisi kredensial sesi WA — JANGAN commit)
 auth_state/
