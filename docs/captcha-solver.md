@@ -33,7 +33,7 @@ Kode terkait:
 
 ## AduanKonten Cloudflare Challenge Handler
 
-Flow AduanKonten memiliki handler best-effort untuk mode headless.
+Flow AduanKonten memiliki handler best-effort untuk mode headless. Laporan produksi dari WhatsApp memakai headed; headless hanya untuk warmup/probe/debug developer.
 
 Konfigurasi:
 
@@ -61,6 +61,6 @@ Kode terkait:
 ## Catatan Operasional
 
 - AduanKonten tetap dapat memberi challenge berulang pada mode headless walaupun cookie `cf_clearance` sudah ada.
-- Jika challenge berulang, gunakan warmup atau submit dengan `--headed`.
+- Jika challenge berulang, gunakan warmup atau submit dengan `--headed`. Jalur WhatsApp bot sudah memakai headed.
 - `ghost-cursor` dipakai untuk interaksi mouse/form, bukan untuk menggantikan session browser yang valid.
 - Simpan session AduanKonten melalui `.aduankonten_profile/` dan `.aduankonten_session.json`.

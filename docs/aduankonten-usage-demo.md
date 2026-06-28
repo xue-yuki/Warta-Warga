@@ -113,13 +113,15 @@ Jika konten sudah pernah dilaporkan, output memakai `kind: "duplicate"`.
 
 Gunakan hanya untuk URL yang benar-benar akan dilaporkan.
 
-Headless:
+Jalur WhatsApp bot memakai headed saat user membalas `Ya`. Mode headless pada script ini hanya untuk developer/debugging karena Cloudflare dapat membuat headless stuck di challenge.
+
+Headless developer/debug:
 
 ```bash
 npm run demo:aduankonten -- --submit --url=https://target.example --category=perjudian --reason="Website ini diduga memuat promosi atau layanan perjudian online yang dapat diakses publik." --debug --challenge-wait-ms=300000
 ```
 
-Headed fallback:
+Headed, sama seperti jalur WhatsApp bot:
 
 ```bash
 npm run demo:aduankonten -- --submit --url=https://target.example --category=perjudian --reason="Website ini diduga memuat promosi atau layanan perjudian online yang dapat diakses publik." --headed --debug --challenge-wait-ms=300000
@@ -202,7 +204,7 @@ ADUANKONTEN_CHECK_INTERVAL_HOURS=0
 
 ## Troubleshooting
 
-- Jika muncul challenge berulang di headless, jalankan headed.
+- Jika muncul challenge berulang di headless, jalankan headed. Jalur WhatsApp bot sudah memaksa headed.
 - Jika `POST /livewire/update` mendapat `HTTP 403 Just a moment`, session masih ditahan Cloudflare.
 - Jika field alasan terseleksi biru atau tidak terisi, pastikan `src/portal/aduankonten.js` memakai `humanFill()` versi terbaru.
 - Jika submit terlihat klik tapi tidak sukses, cek log `response submit`.

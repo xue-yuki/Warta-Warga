@@ -66,7 +66,7 @@ Catatan:
    - `portal_target = 'aduankonten'`
    - `lokasi_detail = url`
    - `kategori = aduankonten:<kategori>`
-6. `submitAduanKonten()` menjalankan browser.
+6. `submitAduanKonten()` menjalankan browser headed untuk laporan dari WhatsApp.
 7. Search URL di halaman utama:
    - isi `#search_url`
    - klik `#btn-search-submit`
@@ -104,22 +104,26 @@ submissionNumber.innerText = 'PH7TVS4'
 
 Kode tidak boleh menganggap sukses hanya karena tombol submit berhasil diklik. Sukses harus dibuktikan oleh redirect `/page/success` dan kode laporan yang terbaca.
 
-## Headless dan Headed
+## Headed dan Headless
 
-Headless dipakai untuk flow otomatis. Namun `aduankonten.id` dapat memberi Cloudflare challenge berulang pada mode headless walaupun `cf_clearance` sudah ada.
+Laporan produksi dari WhatsApp memakai browser headed karena `aduankonten.id` dapat memberi Cloudflare challenge berulang pada mode headless walaupun `cf_clearance` sudah ada. Mode headless tetap tersedia untuk developer saat warmup, probe, dan debugging script.
 
 Alur yang disarankan:
 
-1. Jalankan warmup/probe headless.
-2. Jika form search muncul, lanjut probe atau submit.
-3. Jika Cloudflare challenge berulang, jalankan warmup headed:
+1. Jalankan warmup headed sebelum menjalankan bot:
 
 ```bash
 npm run warmup:aduankonten -- --debug --wait-ms=300000
 ```
 
-4. Setelah session tersimpan, coba ulang probe/submit.
-5. Jika headless tetap re-challenge, gunakan `--headed` untuk submit produksi.
+2. Jalankan bot. Saat user mengonfirmasi laporan dengan `Ya`, bot akan submit memakai headed.
+3. Gunakan headless hanya untuk probe/debug developer:
+
+```bash
+npm run demo:aduankonten -- --probe --url=https://target.example --category=perjudian --debug
+```
+
+4. Jika headless stuck di challenge, ulangi probe/debug dengan `--headed`.
 
 ## Kategori
 
@@ -156,7 +160,7 @@ Checker membuka form lacak AduanKonten, submit kode laporan, parse status yang t
 ## Batasan
 
 - `--submit` mengirim laporan produksi resmi. Jangan gunakan dengan URL dummy.
-- Cloudflare/reCAPTCHA bisa membuat headless gagal walaupun solver melaporkan cookie sudah ada.
+- Cloudflare/reCAPTCHA bisa membuat headless gagal walaupun solver melaporkan cookie sudah ada; jalur WhatsApp sengaja memakai headed.
 - `--debug` menyimpan HTML dan screenshot ke `debug/aduankonten/`.
 - Jika field alasan terseleksi biru atau tidak terisi, pastikan flow memakai helper target-scoped `humanFill()` terbaru.
 - Jika submit tidak sukses, cek log `response submit`. Sukses normal adalah `HTTP 302 -> /page/success`.
