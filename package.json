@@ -8,7 +8,9 @@
   "scripts": {
     "start": "node src/index.js",
     "bot": "node src/index.js",
+    "init": "node scripts/init.js",
     "seed": "node scripts/seed.js",
+    "seed:data": "node scripts/seed.js",
     "seed:laporan": "node scripts/seed-laporan.js",
     "ingest": "node src/ingest.js",
     "scrape": "node src/scrape.js",

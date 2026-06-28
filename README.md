@@ -32,6 +32,7 @@ Prinsip PRD yang ditegakkan kode:
 ```bash
 npm install
 cp .env.example .env      # isi OPENROUTER_API_KEY bila ingin jawaban full-LLM
+npm run init              # init skema DB + cache config, tanpa menyalakan WhatsApp
 npm run seed              # isi KB dengan data sintetis (jalan tanpa API key)
 npm run demo              # uji Agent 2 di terminal (tanpa WhatsApp) 
 npm run bot               # nyalakan bot → scan QR di WhatsApp

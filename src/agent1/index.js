@@ -1,9 +1,8 @@
 import { fetchAndParse, readLocalDoc, isWhitelisted } from './fetch.js';
 import { structureContent } from './structure.js';
-import { insertInfoBansos, updateInfoBansosImage, deleteInfoBySource } from '../db/index.js';
+import { insertInfoBansos, deleteInfoBySource } from '../db/index.js';
 import { indexInfo } from '../kb/vectorStore.js';
 import { normalizeWilayahTag } from '../util/wilayah.js';
-import { generateAndSavePoster } from '../llm/imageGen.js';
 
 /**
  * Pipeline Agent 1 untuk SATU URL resmi: fetch -> parse -> structure (LLM) -> simpan + index.
@@ -61,17 +60,9 @@ export async function storeStructured(info) {
 
   const id = await insertInfoBansos({ ...record, image_id: null, image_path: null });
 
-  // Generate after insert so the poster asset is tied to the exact info_bansos.id.
   record.id = id;
   record.image_id = `info_${id}`;
-  let imagePath = null;
-  try {
-    imagePath = await generateAndSavePoster(record, { imageId: record.image_id });
-  } catch (err) {
-    console.error(`[Agent1] Failed to generate poster image: ${err.message}`);
-  }
-  record.image_path = imagePath;
-  await updateInfoBansosImage(id, { imageId: record.image_id, imagePath });
+  // Poster dibuat saat broadcast (bukan saat ingest) agar tidak boros API tiap scrape.
 
   const nChunks = await indexInfo(id, record);
   console.log(`[Agent1] OK  ${record.program} (${record.wilayah_tag}) → id=${id}, ${nChunks} chunk`);

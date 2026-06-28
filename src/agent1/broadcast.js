@@ -6,7 +6,9 @@ import {
   markBroadcast,
   wasPeringatanSent,
   markPeringatanTerkirim,
+  updateInfoBansosImage,
 } from '../db/index.js';
+import { generateAndSavePoster } from '../llm/imageGen.js';
 import { groupScopeTags, infoMatchesScope, humanWilayah } from '../util/wilayah.js';
 import { formatTanggalID, isExpiredDate, masaBerlakuNotice } from '../util/tanggal.js';
 
@@ -137,6 +139,17 @@ export async function broadcastNewInfos(records) {
 
     const text = formatBroadcast(rec);
     let imagePath = rec.image_path || null;
+    // Generate poster sekarang (saat broadcast) jika belum ada.
+    if (!imagePath && rec.image_id) {
+      try {
+        imagePath = await generateAndSavePoster(rec, { imageId: rec.image_id });
+        if (imagePath && rec.id) {
+          await updateInfoBansosImage(rec.id, { imageId: rec.image_id, imagePath });
+        }
+      } catch (e) {
+        console.warn(`[Broadcast] poster generation failed for "${rec.program}": ${e.message}`);
+      }
+    }
     if (imagePath && !fs.existsSync(imagePath)) {
       console.warn(`[Broadcast] ⚠️ Image file not found: ${imagePath}. Falling back to text-only.`);
       imagePath = null;

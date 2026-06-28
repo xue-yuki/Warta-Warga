@@ -147,7 +147,7 @@ export async function handleLaporLayanan({ text, imageText = null, imageBuffer =
 
   pendingLaporan.set(sessionId, {
     stage: "confirm",
-    data: { kategori: parsed.kategori, deskripsi: parsed.deskripsi, lokasiDetail: parsed.lokasi, lokasiTag, imageBuffer, imageMimetype, messageId },
+    data: { kategori: parsed.kategori, deskripsi: parsed.deskripsi, lokasiDetail: parsed.lokasi, lokasiTag: wilayahTag, imageBuffer, imageMimetype, messageId },
     ts: Date.now(),
   });
 

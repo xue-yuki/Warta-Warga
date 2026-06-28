@@ -447,7 +447,7 @@ export async function updateLaporanLayananStatus(id, status, fields = {}) {
     setters.push(`timestamp = $${values.length + 1}`);
     values.push(now);
     values.push(id);
-    await _pg(`UPDATE laporan_layanan SET ${setters.join(", ")} WHERE id = $${values.length}`, values);
+    await _pg.unsafe(`UPDATE laporan_layanan SET ${setters.join(", ")} WHERE id = $${values.length}`, values);
     return getLaporanLayanan(id);
   }
 
