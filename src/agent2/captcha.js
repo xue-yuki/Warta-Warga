@@ -58,17 +58,17 @@ export async function solveCaptchaImage(buffer, mimetype = "image/png") {
   const data = await res.json();
   const raw = (data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || "").trim();
 
-  // If model returned a long descriptive sentence, consider it a failure to trigger retry
-  if (!raw || raw.length > 40) {
-    throw new Error("Captcha solver returned unexpected/empty text");
+  if (!raw) {
+    throw new Error("Captcha solver returned empty text");
   }
 
-  // sanitize to alphanumerics only (captchas typically are alphanumeric)
-  const matches = raw.match(/[A-Za-z0-9]+/g);
+  const cleaned = raw.replace(/```/g, "").replace(/\s+/g, " ").trim();
+
+  const matches = cleaned.match(/[A-Za-z0-9]+/g);
   if (!matches) {
     throw new Error("Captcha solver returned no alphanumeric characters");
   }
 
-  const text = matches.join("");
+  const text = matches.join("").slice(0, 20);
   return text;
 }

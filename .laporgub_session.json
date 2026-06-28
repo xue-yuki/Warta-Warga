@@ -2,20 +2,20 @@
   "cookies": [
     {
       "name": "XSRF-TOKEN",
-      "value": "eyJpdiI6IllGSzlPbmorMGZMOERsWjVWZVpqd2c9PSIsInZhbHVlIjoiYThkdjlCZ2hhUDNrRWRacmhSRkxRVkZOV0U0L1ltKzhIdVFCU3U4M2RvU0ZoTjFaRFp2b1lhRFhRZWgyNHI5U2s5ZE1KWGM1MkRHUFBVQUU0L2dQTVpOTHNIUFJObFU1RG85VjZzT1FQcGJqS1pySDdLejVBVnVCSndjV0M3SHAiLCJtYWMiOiJlNzYzZWE5OTEyMjRkZTgyYjZiMGQzYjdhMzNjZWNmOGY3ZDhlNmQ1MGFjNmU1YTk1M2VhMWNhZGUwNmM1YTExIiwidGFnIjoiIn0%3D",
+      "value": "eyJpdiI6Ik1QVFhZZXp2VmdQak1yeTdrWFZEWFE9PSIsInZhbHVlIjoiT012SmFBaGhNQlpkaWk5cDNHajJPTmZwWUpER3JsYmhiV0R2ZkMyelhHeXI1SlVBdGxJTWR0RXpUa28zZ2lTczFtZVNIRXIydGQ1S04xeWdCT0l4akV3NmoxdzZzQXZJVGl1TysvR0VkOU1sOUh2eHdEOTczMWdJUjR5ci9TYzQiLCJtYWMiOiI4MDdlNzExYTY5MjQxNWUzZGU3ZWI4Y2RiZDg1NWNkMjlkMTVjYjgyNThlZmUwNzcyOGU3NmNjNjc5OWIwYjRmIiwidGFnIjoiIn0%3D",
       "domain": "laporgub.jatengprov.go.id",
       "path": "/",
-      "expires": 1783185307.802564,
+      "expires": 1783264732.491485,
       "httpOnly": false,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "laporgub_session",
-      "value": "eyJpdiI6IitOcXhVZm94OUJrWTZUODU3YmFPcVE9PSIsInZhbHVlIjoicHMzS3BQSlVrVmdSN2d3L3Z4d0pUQXg1TGI0ekMrdnByeGhxSWhXVHdQT1o3TTVsNWNIU01rRHV4dnJUQVdQU0gwMjNrWmpNMVZPcGZ6cXlZc0sycEQ3STBEWXQ0MjZBYzc0YkVTQVZaTkoxTlNKUWEwdUVWNEZ5VTl4bzBMMXMiLCJtYWMiOiIxMzU0MDFhMmIwMDI0NGU1NmFiMzBjYzg3NDA3OTE0M2ZkMDk5MDc0MGM2ZDY1YjllNWEwMmE4YzRlYzg1N2ZjIiwidGFnIjoiIn0%3D",
+      "value": "eyJpdiI6IlIzbVA4N21rL3JUSkttbFA0MWJuT1E9PSIsInZhbHVlIjoiTVRrMXJSM1BBdzlEcTBYMkE2eFkrVndNVFVjc0F0Q3BvRVdab1czejYyYXMvcnRRTXV5ZnZzVTMzblFFelZBay9CeWY0dmFzZGx4cGIvUzNsQ1IrRWVHQjBGaTNxQUpWeFVKSS93bFo1K2dOTEZZU2pydndYSk9DQ0w2Ykc2ODQiLCJtYWMiOiIzZmQwMTQ3YzZmYjgzMzM5ZjBiZDYzNGE0Y2RlNTMwNGIxZDYyZjcwYjA3MDUxMjhmZDg1NjM1YzVhZTMzZmMxIiwidGFnIjoiIn0%3D",
       "domain": "laporgub.jatengprov.go.id",
       "path": "/",
-      "expires": 1783185307.802737,
+      "expires": 1783264732.491706,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"
