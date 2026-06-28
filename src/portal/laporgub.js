@@ -12,50 +12,49 @@ function ensureDir(filePath) {
 }
 
 export async function solveCaptcha(page) {
-  const visibleSelector = "#img-captcha-desktop:visible, #img-captcha:visible";
-  const plainSelector = "#img-captcha-desktop, #img-captcha";
-
-  if ((await page.locator(visibleSelector).count()) === 0) {
-    await page.waitForSelector(plainSelector, { state: "attached", timeout: 15000 });
-  }
+  const selectors = ["img#img-captcha", "img[src*='/captcha/']", "#img-captcha-desktop", "#img-captcha"];
+  const selector = selectors.join(", ");
 
   if (!hasVision()) {
     throw new Error("Vision API not configured, cannot solve captcha automatically.");
   }
-  // Simpler approach (like the Python script): screenshot current visible captcha and OCR it.
-  // Retry a few times if the vision call fails or returns empty.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const img = page.locator(visibleSelector).first();
-    await img.waitFor({ state: "visible", timeout: 15000 });
 
-    // wait until the image element reports as loaded and has naturalWidth
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const img = page.locator(selector).first();
+    try {
+      await img.waitFor({ state: "visible", timeout: 15000 });
+    } catch {
+      await page.waitForSelector(selector, { state: "attached", timeout: 15000 });
+    }
+
     try {
       await page.waitForFunction(
         (sel) => {
           const el = document.querySelector(sel);
           return !!(el && el.complete && el.naturalWidth && el.naturalWidth > 0);
         },
-        visibleSelector,
+        selector,
         { timeout: 5000 },
       );
-    } catch (e) {
-      // ignore, continue to screenshot anyway
+    } catch {
+      // continue with screenshot attempt
     }
 
-    // small stabilization delay to avoid transient image swaps
-    await page.waitForTimeout(1500);
-
+    await page.waitForTimeout(1000);
     const screenshot = await img.screenshot();
 
     try {
       const text = await solveCaptchaImage(screenshot, "image/png");
-      if (text && text.trim()) return text.replace(/\s+/g, "");
-    } catch (err) {
-      // ignore and retry
+      if (text && text.trim()) {
+        return text.replace(/\s+/g, "");
+      }
+    } catch {
+      // retry if OCR fails
     }
 
-    // short pause before next attempt
-    await page.waitForTimeout(500);
+    if (attempt < 2) {
+      await page.waitForTimeout(1000);
+    }
   }
 
   throw new Error("Failed to solve captcha reliably after multiple attempts");
