@@ -281,7 +281,13 @@ async function submitPendingLaporKonten({ url, categoryKey, reason, imageBuffer,
 
   await updateLaporanLayananStatus(id, "confirmed");
   try {
-    const result = await submitAduanKonten({ url, categoryId: category.id, reason, attachmentPath: lampiranPath });
+    const result = await submitAduanKonten({
+      url,
+      categoryId: category.id,
+      reason,
+      attachmentPath: lampiranPath,
+      headless: false,
+    });
     if (result.duplicate) {
       await updateLaporanLayananStatus(id, "duplicate", {
         nomor_ticket: result.existingSubmissionId || null,
