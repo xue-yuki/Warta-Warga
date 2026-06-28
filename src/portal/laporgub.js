@@ -2,7 +2,7 @@ import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
 import { config, hasLaporGub } from "../config.js";
-import { getCaptchaSolverProviders, solveCaptchaImage } from "../agent2/captcha.js";
+import { solveCaptchaImage } from "../agent2/captcha.js";
 
 const BASE_URL = config.laporgub.baseUrl;
 const SESSION_PATH = config.laporgub.sessionPath;
@@ -11,12 +11,8 @@ function ensureDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
-export async function solveCaptcha(page) {
+export async function solveCaptcha(page, debugSavePath = null) {
   const selectors = ["img#img-captcha", "img[src*='/captcha/']", "#img-captcha-desktop", "#img-captcha"];
-
-  if (!getCaptchaSolverProviders().length) {
-    throw new Error("Captcha OCR provider not configured, cannot solve captcha automatically.");
-  }
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const targetSelector = await page.evaluate((candidateSelectors) => {
@@ -56,9 +52,15 @@ export async function solveCaptcha(page) {
     try {
       const text = await solveCaptchaImage(screenshot, "image/png");
       if (text && text.trim()) {
+        // Simpan screenshot captcha bila debug path disediakan
+        if (debugSavePath) {
+          try { fs.writeFileSync(debugSavePath, screenshot); } catch { /* abaikan */ }
+          console.log(`[laporgub] captcha screenshot saved: ${debugSavePath}, ocr result: "${text.replace(/\s+/g, "")}"`);
+        }
         return text.replace(/\s+/g, "");
       }
-    } catch {
+    } catch (err) {
+      console.warn(`[laporgub] solveCaptchaImage attempt ${attempt + 1} failed: ${err.message}`);
       // retry if OCR fails
     }
 
@@ -172,13 +174,13 @@ export async function submitLaporGub({ isiAduan, lokasiAduan, jenisAduan = "Publ
     throw new Error("LaporGub credentials are not configured");
   }
 
-  const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: true });
   try {
     const context = await createContext(browser);
     await loginIfNeeded(context);
 
     // Buka halaman baru setelah loginIfNeeded selesai sepenuhnya
-    page = await context.newPage();
+    const page = await context.newPage();
     await page.goto(`${BASE_URL}/buat-aduan`, { waitUntil: "networkidle" });
 
     if (page.url().includes("/login")) {
@@ -237,17 +239,44 @@ export async function submitLaporGub({ isiAduan, lokasiAduan, jenisAduan = "Publ
       }
 
       await page.waitForSelector("#img-captcha-desktop", { state: "visible", timeout: 15000 });
-      const captchaText = await solveCaptcha(page);
+
+      // DEBUG: simpan screenshot captcha ke disk untuk verifikasi hasil OCR
+      const debugDir = process.env.LAPORGUB_DEBUG_DIR || "";
+      let captchaScreenshotPath = null;
+      if (debugDir) {
+        const ts = Date.now();
+        captchaScreenshotPath = path.join(debugDir, `captcha_attempt${attempt}_${ts}.png`);
+        fs.mkdirSync(debugDir, { recursive: true });
+      }
+
+      const captchaText = await solveCaptcha(page, captchaScreenshotPath);
+      console.log(`[laporgub] attempt ${attempt + 1}: captcha solved = "${captchaText}"`);
+
+      // Set nilai captcha ke KEDUA field via jQuery val() agar form submit handler bisa membacanya.
       await page.evaluate((text) => {
+        if (typeof $ !== "undefined") {
+          $("#captcha").val(text).trigger("input").trigger("change");
+          $("#captcha-desktop").val(text).trigger("input").trigger("change");
+        }
+        // Fallback native setter untuk memastikan .value property juga terupdate
         ["captcha", "captcha-desktop"].forEach((id) => {
           const el = document.getElementById(id);
-          if (el) {
-            el.value = text;
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-          }
+          if (!el) return;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+          if (nativeSetter) nativeSetter.call(el, text);
+          else el.value = text;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
         });
       }, captchaText);
+
+      // Verifikasi nilai benar-benar terset di field
+      const verifyDesktop = await page.evaluate(() => document.getElementById("captcha-desktop")?.value || "");
+      const verifyMobile = await page.evaluate(() => document.getElementById("captcha")?.value || "");
+      console.log(`[laporgub] field values after set — desktop="${verifyDesktop}" mobile="${verifyMobile}"`);
+
+      // Beri waktu agar nilai captcha benar-benar terset sebelum btn-step3 diklik
+      await page.waitForTimeout(300);
       await page.locator("#btn-step3").click();
 
       try {

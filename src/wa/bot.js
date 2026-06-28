@@ -7,8 +7,8 @@ import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
 import { handleLaporKonten } from "../agent2/lapor-konten.js";
 import { handleLaporLayanan } from "../agent2/lapor-layanan.js";
-import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
+import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
 import { describeImage } from "../agent2/vision.js";
 import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah } from "../util/wilayah.js";
@@ -171,6 +171,7 @@ export async function startBot() {
       
             // Daftarkan pengirim notifikasi LaporGub agar follow-up bisa dikirim ke pelapor.
       setLaporgubNotifier((jid, text) => sock.sendMessage(jid, { text }));
+      // Daftarkan pengirim notifikasi AduanKonten.
       setAduanKontenNotifier((jid, text) => sock.sendMessage(jid, { text }));
       startAgent2ServiceCheckers();
     }

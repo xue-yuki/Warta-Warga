@@ -1,8 +1,8 @@
 import { config } from "../config.js";
 
 export async function solveCaptchaImage(buffer, mimetype = "image/png") {
-  if (!hasVision() || !buffer?.length) {
-    throw new Error("Vision API not configured or captcha image is empty");
+  if (!buffer?.length) {
+    throw new Error("Captcha image is empty");
   }
 
   const baseUrl = (process.env.IMAGE_BASE_URL || process.env.LLM_BASE_URL || "").trim().replace(/\/+$/, "");
@@ -27,16 +27,16 @@ export async function solveCaptchaImage(buffer, mimetype = "image/png") {
   const userPrompt = process.env.VISION_PROMPT_USER || "Read the captcha text in this image. Reply with ONLY the captcha text, nothing else. No spaces, no punctuation.";
 
   const body = {
-    model: provider.model,
+    model,
     temperature,
     max_tokens: maxTokens,
     messages: [
-      { role: "system", content: prompts.system },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
         content: [
           { type: "image_url", image_url: { url: `data:${mimetype};base64,${buffer.toString("base64")}` } },
-          { type: "text", text: prompts.user },
+          { type: "text", text: userPrompt },
         ],
       },
     ],
@@ -45,42 +45,30 @@ export async function solveCaptchaImage(buffer, mimetype = "image/png") {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${provider.apiKey}`,
-      ...provider.headers,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    throw new Error(`${provider.name} vision ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    throw new Error(`vision ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
   }
 
   const data = await res.json();
   const raw = (data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || "").trim();
-  return parseCaptchaText(raw);
-}
 
-export async function solveCaptchaImage(buffer, mimetype = "image/png") {
-  if (!buffer?.length) {
-    throw new Error("Captcha image is empty");
+  if (!raw) {
+    throw new Error("Captcha solver returned empty text");
   }
 
-  const providers = buildCaptchaProviders();
-  if (!providers.length) {
-    throw new Error(
-      "Captcha OCR is not configured. Set VISION_API_KEY for Gemini, or set OPENROUTER_API_KEY plus CAPTCHA_OPENROUTER_MODEL for OpenRouter.",
-    );
+  const cleaned = raw.replace(/```/g, "").replace(/\s+/g, " ").trim();
+
+  const matches = cleaned.match(/[A-Za-z0-9]+/g);
+  if (!matches) {
+    throw new Error("Captcha solver returned no alphanumeric characters");
   }
 
-  const errors = [];
-  for (const provider of providers) {
-    try {
-      return await solveWithProvider(provider, buffer, mimetype);
-    } catch (err) {
-      errors.push(`${provider.name}: ${err.message}`);
-    }
-  }
-
-  throw new Error(`Captcha OCR failed with all configured providers: ${errors.join(" | ")}`);
+  const text = matches.join("").slice(0, 20);
+  return text;
 }

@@ -2,7 +2,6 @@ import { startBot } from "./wa/bot.js";
 import { startAutoScrape } from "./agent1/scheduler.js";
 import { startDashboard } from "./dashboard/server.js";
 import { initRuntime } from "./runtime/init.js";
-// import { startLaporgubChecker } from "./agent2/laporgub-checker.js";
 
 async function main() {
   await initRuntime();
@@ -19,6 +18,9 @@ async function main() {
       console.warn("[dashboard] gagal start:", e.message);
     }
   }
+
+  // Checker layanan (LaporGub + AduanKonten) distart dari bot.js via startAgent2ServiceCheckers()
+  // saat koneksi WA terbuka, agar notifier sudah terdaftar sebelum checker pertama kali jalan.
 
   console.log("\nMenyalakan WhatsApp bot...\n");
   await startBot();
