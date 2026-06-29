@@ -111,6 +111,34 @@ Untuk test yang harus terisolasi dari Supabase produksi, prefix command dengan `
 
 Untuk sengaja mengaktifkan broadcast otomatis info bansos baru dari hasil scrape, set `NEW_INFO_BROADCAST_AUTO=true`. Jangan aktifkan ini untuk demo synthetic atau saat bot terhubung ke grup sungguhan kecuali memang ingin semua info baru langsung disebar.
 
+## Ingest Hoaks Harian Komdigi
+
+Bot secara otomatis mengunduh dan mengindeks daftar hoaks harian dari [TrustPositif Komdigi](https://trustpositif.komdigi.go.id/pdfhoaks/Harian) setiap kali bot start dan setiap 12 jam.
+
+**Cara kerja:**
+1. Unduh PDF hari ini (`YYYY-MM-DD.pdf`), mundur ke kemarin bila 404.
+2. Ekstrak teks PDF → kirim ke LLM dalam batch → dapatkan daftar `{judul, penjelasan, verdict, links}`.
+3. Simpan tiap entri sebagai `[Hoaks] <judul>` ke `info_bansos` + `kb_chunks`.
+4. Agent 2 dapat menemukannya via `cari_sumber_resmi` saat warga mengirim klaim untuk diverifikasi.
+
+**Prasyarat:** `OPENROUTER_API_KEY` harus diset (sama dengan kebutuhan Agent 1 lainnya).
+
+**Jalankan manual / uji tanpa menjalankan bot penuh:**
+
+```bash
+node --input-type=module --eval "
+import 'dotenv/config';
+import { initDb } from './src/db/index.js';
+import { ingestKomdigiHoaks } from './src/agent1/komdigi.js';
+await initDb();
+const r = await ingestKomdigiHoaks();
+console.log(r);
+process.exit(0);
+"
+```
+
+**Saat bot berjalan** (`npm run bot`), ingest berjalan otomatis di latar belakang — tidak ada langkah tambahan yang diperlukan.
+
 ## Agent 1 on-demand
 
 ```bash

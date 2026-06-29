@@ -5,6 +5,7 @@ import { searchOfficialSources } from './search.js';
 import { broadcastNewInfos, broadcastPendingPeringatan } from './broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
 import { listSumberCrawl } from '../db/index.js';
+import { ingestKomdigiHoaks } from './komdigi.js';
 
 // Auto-scrape Agent 1: pindai daftar sumber resmi (data/sources.json) secara berkala,
 // strukturkan via LLM, lalu segarkan Knowledge Base. Re-scrape = REFRESH (dedup by sumber_url).
@@ -95,7 +96,7 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
 }
 
 /** Aktifkan penjadwal: scrape saat boot (opsional) + interval berkala. Non-blocking. */
-export function startAutoScrape() {
+export function startIngestScheduler() {
   if (!config.scrape.enabled) {
     console.log('[Agent1] Auto-scrape NONAKTIF (SCRAPE_AUTO=false).');
     return;
@@ -110,9 +111,13 @@ export function startAutoScrape() {
     scrapeAllSources({ reason: 'startup' }).catch((e) => console.warn('[Agent1] scrape startup gagal:', e.message));
   }
 
+  // Komdigi hoaks selalu diingest saat bot start (PDF harian kecil, bukan crawl besar).
+  ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] startup gagal:', e.message));
+
   const ms = Math.max(1, config.scrape.intervalHours) * 60 * 60 * 1000;
   _timer = setInterval(() => {
     scrapeAllSources({ reason: 'terjadwal' }).catch((e) => console.warn('[Agent1] scrape terjadwal gagal:', e.message));
+    ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] terjadwal gagal:', e.message));
   }, ms);
   _timer.unref?.(); // jangan menahan proses tetap hidup hanya karena timer
   console.log(`[Agent1] ⏱️  Auto-scrape aktif tiap ${config.scrape.intervalHours} jam.`);
@@ -129,12 +134,15 @@ export function startAutoScrape() {
   }
 }
 
-export function stopAutoScrape() {
+export function stopIngestScheduler() {
   if (_timer) clearInterval(_timer);
   _timer = null;
   if (_pendingTimer) clearInterval(_pendingTimer);
   _pendingTimer = null;
 }
+
+export const startAutoScrape = startIngestScheduler;
+export const stopAutoScrape = stopIngestScheduler;
 
 /**
  * ON-DEMAND: cari sumber resmi sebuah daerah lewat web search, lalu scrape & simpan.

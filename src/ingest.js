@@ -1,9 +1,16 @@
 // CLI Agent 1 (on-demand). Contoh:
 //   node src/ingest.js url https://kemensos.go.id/xxx --wilayah kabupaten:banyumas
 //   node src/ingest.js file ./data/synthetic/contoh.txt --url https://dinsos.banyumaskab.go.id/x --wilayah kabupaten:banyumas
+import { fileURLToPath } from 'node:url';
 import { initDb } from './db/index.js';
 import { ingestUrl, ingestLocalDoc } from './agent1/index.js';
 import { hasLLM } from './config.js';
+import { startIngestScheduler, stopIngestScheduler } from './agent1/scheduler.js';
+
+export {
+  startIngestScheduler,
+  stopIngestScheduler,
+};
 
 function parseFlags(args) {
   const out = {};
@@ -39,4 +46,9 @@ async function main() {
   process.exit(0);
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('Gagal menjalankan ingest:', err);
+    process.exit(1);
+  });
+}

@@ -28,6 +28,7 @@
     "test:vision": "node scripts/test-vision.js",
     "dashboard:demo": "node scripts/dashboard.js",
     "check:laporgub": "node scripts/check-laporgub.js",
+    "check:komdigi": "node scripts/check-komdigi.js",
     "check:aduankonten": "node scripts/check-aduankonten.js",
     "migrate:supabase": "node scripts/migrate-to-supabase.js"
   },
@@ -42,6 +43,7 @@
     "ghost-cursor": "^1.4.2",
     "openai": "^6.45.0",
     "patchright": "^1.61.1",
+    "pdf-parse": "^2.4.5",
     "pino": "^9.4.0",
     "playwright-core": "^1.61.0",
     "postgres": "^3.4.9",
