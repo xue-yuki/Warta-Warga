@@ -3,6 +3,7 @@ node_modules/
 *.log
 .aduankonten_session.json
 .aduankonten_profile/
+.laporgub_session.json
 debug/
 .claude/
 aduankontenid.txt
@@ -20,3 +21,8 @@ data/warta.db
 data/warta.db-*
 .cache/
 models/
+
+# Generated debug & poster files
+data/laporgub-debug/
+data/posters/*.png
+data/posters/*.json

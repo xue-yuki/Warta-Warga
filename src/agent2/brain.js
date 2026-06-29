@@ -13,10 +13,11 @@ import { search } from '../kb/vectorStore.js';
 import { trendingModus } from '../db/index.js';
 import { simpanLaporanTool, humanModus } from './lapor.js';
 import { inspectUrl } from './checkurl.js';
+import { submitLaporanLayanan } from './lapor-layanan.js';
 import { humanWilayah, normalizeWilayahTag, isKabKota } from '../util/wilayah.js';
 
 const MIN_SCORE = 0.25;
-const MAX_STEPS = 4; // batas putaran tool-calling agar tak loop tak berujung
+const MAX_STEPS = 6; // lebih dari 4 karena kirim_aduan_layanan butuh round-trip konfirmasi
 
 const SYSTEM = `Kamu "Warta Warga", asisten WhatsApp untuk warga Indonesia — khususnya lansia dan warga yang tidak terbiasa teknologi. Tiga fokusmu:
 (1) info bantuan sosial (bansos) dari sumber resmi,
@@ -134,6 +135,40 @@ TOOLS — PAKAI DENGAN INISIATIFMU
   → WAJIB tanpa identitas (tanpa nama/nomor/alamat).
   → Setelah sukses: jawab dengan penilaian (penipuan/hati-hati), alasan singkat, langkah aman, lalu konfirmasi laporan diterima.
 
+- kirim_aduan_layanan(deskripsi, kabupaten_kota, kategori)
+  → Panggil saat warga ingin melaporkan masalah LAYANAN PUBLIK FISIK (jalan rusak, listrik mati, air PDAM, sampah, fasilitas umum, dll) KE PORTAL RESMI.
+  → JANGAN panggil untuk penipuan/hoaks — itu pakai catat_laporan.
+  → WAJIB punya dua info sebelum panggil: (a) deskripsi masalah yang jelas (minimal ceritakan apa masalahnya dan di mana) dan (b) kabupaten/kota lokasi masalah.
+  → Kalau belum lengkap → tanya dulu dengan natural, jangan langsung panggil tool.
+  → Alur: (1) kumpulkan info → (2) tampilkan ringkasan + tanya "Mau saya kirimkan?" → (3) saat warga jawab Ya/setuju → LANGSUNG PANGGIL TOOL INI sekarang juga — jangan balas teks "oke" dahulu.
+  → KRITIS: Tool call adalah tindakan PERTAMA saat warga konfirmasi. Bukan membalas teks dulu. Tool result akan memberi status pengiriman untuk disampaikan ke warga.
+  → DILARANG KERAS: Jangan pernah menulis "laporan berhasil dikirim", "sedang dikirimkan", atau kalimat seolah pengiriman sudah terjadi SEBELUM tool ini dipanggil dan hasilnya diterima.
+
+FORMAT RESPONS ADUAN LAYANAN (gunakan setelah menerima hasil tool kirim_aduan_layanan)
+
+Bila berhasil (ok: true dari tool result):
+---
+✅ Laporan sudah dikirim ke portal resmi.
+
+📋 Ringkasan aduan:
+• Masalah: [deskripsi singkat]
+• Lokasi: [kabupaten/kota]
+• Kategori: [kategori]
+
+🎫 Nomor tiket: *[nomor tiket atau "tidak tersedia"]*
+
+Laporan Bapak/Ibu sudah kami sampaikan. Semoga segera ditindaklanjuti ya 🙏
+---
+
+Bila gagal (ok: false dari tool result):
+---
+⚠️ Maaf, laporan belum berhasil dikirim saat ini.
+
+[pesan error singkat dari tool result]
+
+Bapak/Ibu bisa coba lagi nanti, atau langsung ke portal resmi daerah ya 🙏
+---
+
 CARA VERIFIKASI INFORMASI — SAMPAIKAN SEDERHANA
 Saat warga tanya "apakah ini asli/palsu?", "benarkah X?", "ini hoaks?":
 1. Panggil cari_sumber_resmi dulu untuk mencari fakta relevan.
@@ -230,6 +265,35 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'kirim_aduan_layanan',
+      description:
+        'Kirim aduan layanan publik fisik (jalan rusak, listrik mati, air PDAM, sampah, fasilitas umum, dll) ke portal resmi pemerintah. ' +
+        'Panggil HANYA setelah warga mengkonfirmasi mau kirim dan kamu sudah tahu (a) deskripsi masalah yang jelas dan (b) kabupaten/kota lokasi. ' +
+        'JANGAN panggil untuk penipuan/hoaks — itu pakai catat_laporan.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deskripsi: {
+            type: 'string',
+            description: 'Deskripsi lengkap masalah layanan publik, minimal 50 karakter. Ceritakan apa masalahnya, di mana tepatnya, dan kondisinya seperti apa.',
+          },
+          kabupaten_kota: {
+            type: 'string',
+            description: 'Nama kabupaten atau kota lokasi masalah, mis. "Kab. Purbalingga" atau "Kota Semarang".',
+          },
+          kategori: {
+            type: 'string',
+            enum: ['listrik', 'air', 'jalan', 'sampah', 'lainnya'],
+            description: 'Kategori masalah layanan publik.',
+          },
+        },
+        required: ['deskripsi', 'kabupaten_kota', 'kategori'],
+      },
+    },
+  },
 ];
 
 // Konversi markdown standar ke format WhatsApp: **bold** → *bold*, ~~coret~~ → ~coret~
@@ -283,7 +347,7 @@ function assertsBansosFact(text) {
  * @returns {Promise<{reply:string, aksi:string, label:null, grounded:boolean}>}
  *   aksi diturunkan dari tool yang dipakai (info/lapor/ngobrol) — hanya untuk routing discovery & log.
  */
-export async function think(text, { history = [], scopeTags = null, wilayahTag = null } = {}) {
+export async function think(text, { history = [], scopeTags = null, wilayahTag = null, sessionId = null } = {}) {
   if (!hasLLM()) {
     return { reply: 'Hai! 🙂 Aku bisa bantu info bansos atau cek kabar/laporan penipuan. Mau yang mana?', aksi: 'ngobrol', label: null, grounded: false };
   }
@@ -303,19 +367,29 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
   let grounded = false;
   let searched = false; // apakah cari_sumber_resmi sudah dipanggil giliran ini?
   let nudgedGrounding = false; // penegak grounding hanya sekali (cegah loop)
+  let aduanSent = false;   // apakah kirim_aduan_layanan sudah dipanggil
+  let nudgedAduan = false; // penegak aduan hanya sekali
+
+  console.log(`[brain] think() dipanggil | sessionId=${sessionId} | history=${history.length} turns | text="${text?.slice(0,80)}"`);
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       const lastStep = step === MAX_STEPS - 1;
+      console.log(`[brain] step ${step}/${MAX_STEPS-1} | lastStep=${lastStep} | aksi=${aksi}`);
       const msg = await chatWithTools({ messages, tools: TOOLS, toolChoice: lastStep ? 'none' : 'auto' });
       const calls = msg?.tool_calls || [];
+      console.log(`[brain] step ${step} response | tool_calls=${calls.length} | content="${(msg?.content||'').slice(0,100)}"`);
 
       if (!calls.length) {
         let reply = (msg?.content || '').trim();
-        if (!reply) return { reply: FALLBACK_REPLY, aksi, label: null, grounded };
+        if (!reply) {
+          console.log('[brain] reply kosong → FALLBACK_REPLY');
+          return { reply: FALLBACK_REPLY, aksi, label: null, grounded };
+        }
 
         // Penegak grounding: ngaku fakta bansos tanpa pernah cari sumber → paksa cari dulu (sekali).
         if (!searched && !nudgedGrounding && !lastStep && assertsBansosFact(reply)) {
+          console.log('[brain] grounding nudge triggered');
           nudgedGrounding = true;
           messages.push(msg);
           messages.push({
@@ -328,13 +402,31 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           continue;
         }
 
+        // Penegak aduan: LLM mengklaim "laporan berhasil dikirim" tanpa call kirim_aduan_layanan → paksa call.
+        const ADUAN_CLAIM = /laporan.*(?:berhasil|sudah|telah).*(?:dikir|terkirim|diterima)|(?:mengirim|sedang dikirim|akan dikirim).*laporan/i;
+        if (!aduanSent && !nudgedAduan && !lastStep && ADUAN_CLAIM.test(reply)) {
+          console.log('[brain] aduan nudge triggered | reply snippet:', reply.slice(0, 100));
+          nudgedAduan = true;
+          messages.push(msg);
+          messages.push({
+            role: 'system',
+            content:
+              'PERINGATAN: Kamu baru saja mengklaim laporan sudah/sedang dikirim, tapi tool kirim_aduan_layanan BELUM dipanggil. ' +
+              'Ini TIDAK BOLEH — jangan pernah mengklaim pengiriman sebelum tool dipanggil dan hasilnya diterima. ' +
+              'SEKARANG panggil tool kirim_aduan_layanan dengan data yang sudah ada dari percakapan.',
+          });
+          continue;
+        }
+
         reply = mdToWA(maybeAppendSumber(sanitizeUrls(reply, allowedUrls), usedSources));
+        console.log(`[brain] final reply | aksi=${aksi} | reply="${reply.slice(0,100)}"`);
         return { reply, aksi, label: null, grounded };
       }
 
       // Ada tool call → eksekusi, sisipkan hasil, lalu putar lagi agar LLM memakai hasilnya.
       messages.push(msg);
       for (const tc of calls) {
+        console.log(`[brain] tool call: ${tc.function?.name}`, tc.function?.arguments?.slice(0, 200));
         let args = {};
         try {
           args = JSON.parse(tc.function?.arguments || '{}');
@@ -382,6 +474,20 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
               ? `Laporan berhasil dicatat untuk wilayah ${toolResult.wilayah || args.wilayah_kabkota}. Akan ditinjau pengurus sebelum peringatan disebar ke warga lain.`
               : 'Gagal menyimpan laporan. Minta warga coba kirim lagi.',
           });
+        } else if (tc.function?.name === 'kirim_aduan_layanan') {
+          aksi = 'aduan_layanan';
+          aduanSent = true;
+          console.log('[brain] kirim_aduan_layanan dipanggil:', JSON.stringify(args));
+          result = JSON.stringify(
+            await submitLaporanLayanan({
+              deskripsi: args.deskripsi || '',
+              kabupatenKota: args.kabupaten_kota || '',
+              kategori: args.kategori || 'lainnya',
+              wilayahTagGrup: wilayahTag,
+              sessionId,
+            })
+          );
+          console.log('[brain] kirim_aduan_layanan hasil:', result);
         } else {
           result = 'Tool tidak dikenal.';
         }
@@ -390,14 +496,17 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
     }
   } catch (err) {
     // Jangan jatuh ke balasan bisu yang menghapus konteks — coba sekali tanpa tool, lalu fallback.
+    console.warn('[brain] error di loop tool-calling:', err?.message, err?.stack?.split('\n')[1]);
     try {
       const recover = await chat({ tier: 'fast', temperature: 0.4, maxTokens: 300, messages });
+      console.log('[brain] recover reply:', recover?.slice(0, 100));
       if (recover && recover.trim()) return { reply: mdToWA(sanitizeUrls(recover.trim(), allowedUrls)), aksi, label: null, grounded };
-    } catch {
-      /* abaikan */
+    } catch (recoverErr) {
+      console.warn('[brain] recover juga gagal:', recoverErr?.message);
     }
     return { reply: FALLBACK_REPLY, aksi, label: null, grounded };
   }
 
+  console.log('[brain] loop habis MAX_STEPS tanpa reply → FALLBACK_REPLY');
   return { reply: FALLBACK_REPLY, aksi, label: null, grounded };
 }

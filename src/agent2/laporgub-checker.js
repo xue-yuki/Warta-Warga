@@ -45,9 +45,13 @@ function recipientJidFromSessionId(sessionId) {
     const maybeGroup = str.slice(0, lastColon);
     const participant = str.slice(lastColon + 1);
     if (maybeGroup.endsWith("@g.us") && participant) {
-      return participant;
+      // Kirim notifikasi ke grup (bukan japri) agar warga yang lapor di grup
+      // dapat update di konteks yang sama. Baileys kirim ke grup butuh JID grup.
+      return maybeGroup;
     }
   }
+  // Japri: pastikan JID punya domain yang valid
+  if (!str.includes("@")) return `${str}@s.whatsapp.net`;
   return str;
 }
 

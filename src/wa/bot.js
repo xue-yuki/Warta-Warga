@@ -7,7 +7,7 @@ import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
 import { handleLaporKonten } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
-import { handleLaporLayanan } from "../agent2/lapor-layanan.js";
+import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
 import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
@@ -423,10 +423,28 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
     return;
   }
 
-  const reportResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
-  if (reportResult?.reply) {
-    await send(reportResult.reply);
-    return;
+  // Simpan gambar ke image store agar bisa dipakai saat submit aduan layanan via LLM tool
+  if (imageBuffer && sessionId) {
+    storeImageForSession(sessionId, { imageBuffer, imageMimetype, imageText });
+  }
+
+  // Untuk gambar tanpa teks: tangkap dulu di lapor-layanan agar buffer tersimpan di pending state,
+  // menunggu teks penjelasan dari warga. Pesan teks biasa langsung ke brain (tidak perlu keyword matching).
+  if (imageBuffer && !text) {
+    const imageOnlyResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+    if (imageOnlyResult?.reply) {
+      await send(imageOnlyResult.reply);
+      return;
+    }
+  }
+
+  // Cek pending image state (warga sedang menunggu konfirmasi setelah kirim gambar)
+  if (hasPendingLaporanLayanan(sessionId)) {
+    const pendingResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+    if (pendingResult?.reply) {
+      await send(pendingResult.reply);
+      return;
+    }
   }
 
   const result = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });

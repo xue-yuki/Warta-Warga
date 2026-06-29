@@ -189,19 +189,52 @@ export async function submitLaporGub({ isiAduan, lokasiAduan, jenisAduan = "Publ
     }
 
     if (lampiranPath) {
+      // hidden-input adalah input file tersembunyi di balik area drag-drop.
+      // setInputFiles langsung bekerja tanpa perlu klik trigger-nya.
       const input = page.locator("#hidden-input");
       await input.setInputFiles(lampiranPath);
-      await page.waitForTimeout(500);
+      // Tunggu preview muncul di gallery (indikasi file berhasil di-attach)
+      await page.waitForSelector("#gallery .hasImage, #gallery li:not(#empty)", { timeout: 5000 }).catch(() => {
+        // Tidak fatal kalau preview tidak muncul — file tetap bisa ter-attach
+      });
+      await page.waitForTimeout(300);
     }
 
+    // Tunggu Quill editor benar-benar diinisialisasi (bukan hanya DOM visible)
+    // Quill init async — .ql-editor ada di DOM tapi belum siap menerima input
     const quill = page.locator("#aduan-editor .ql-editor");
-    await quill.waitFor({ state: "visible", timeout: 15000 });
+    await quill.waitFor({ state: "visible", timeout: 30000 });
+    // Pastikan Quill instance sudah ready (quillEditor variable diset oleh DOMContentLoaded)
+    await page.waitForFunction(() => {
+      return typeof window.quillEditor !== "undefined" && window.quillEditor !== null;
+    }, { timeout: 15000 }).catch(() => {
+      // Quill variable mungkin bernama lain — lanjut saja, sudah visible
+    });
     await quill.click();
-    await quill.fill(isiAduan);
+    // Isi via Quill API langsung (lebih reliable dari .fill pada contenteditable)
     await page.evaluate((text) => {
+      if (window.quillEditor) {
+        window.quillEditor.setText(text);
+        // Trigger text-change agar hidden textarea #aduan ikut terupdate
+        window.quillEditor.update();
+      }
+      // Sinkronkan hidden textarea secara eksplisit
       const el = document.getElementById("aduan");
-      if (el) el.value = text;
+      if (el) {
+        el.value = text;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     }, isiAduan);
+    // Verifikasi hidden textarea terisi
+    const aduanValue = await page.evaluate(() => document.getElementById("aduan")?.value || "");
+    if (!aduanValue || aduanValue.trim().length < 10) {
+      // Fallback: fill langsung ke contenteditable
+      await quill.fill(isiAduan);
+      await page.evaluate((text) => {
+        const el = document.getElementById("aduan");
+        if (el) el.value = text;
+      }, isiAduan);
+    }
 
     await page.click(".select2-container--tailwind, .select2-selection, [aria-labelledby*=lokasi]");
     await page.waitForTimeout(500);
@@ -213,12 +246,68 @@ export async function submitLaporGub({ isiAduan, lokasiAduan, jenisAduan = "Publ
 
     const jenisValue = jenisAduan.toLowerCase() === "public" ? "1" : "0";
     await page.selectOption("#jenis", jenisValue);
+
+    // Intercept response AJAX step-1 sebelum klik — tangkap error server sebelum timeout
+    const step1ResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("/complaint/create-step-1") && r.request().method() === "POST",
+      { timeout: 30000 }
+    ).catch(() => null);
+
     await page.locator("#btn-step1").click();
-    await page.locator("#step2-content").waitFor({ state: "visible", timeout: 15000 });
+
+    const step1Response = await step1ResponsePromise;
+    if (step1Response) {
+      const status = step1Response.status();
+      if (status >= 400) {
+        const body = await step1Response.text().catch(() => "");
+        throw new Error(`Step 1 AJAX gagal (HTTP ${status}): ${body.slice(0, 200)}`);
+      }
+    }
+
+    // Tunggu step2-content visible (class 'hidden' dihapus oleh nextStep() setelah AJAX sukses)
+    try {
+      await page.locator("#step2-content").waitFor({ state: "visible", timeout: 20000 });
+    } catch {
+      // Step 2 tidak muncul — cek apakah ada SweetAlert error dari server
+      const swalText = await page.evaluate(() => {
+        const el = document.querySelector(".swal2-html-container, .swal2-content, .sweet-alert p");
+        return el ? el.textContent?.trim() : null;
+      });
+      if (swalText) throw new Error(`Step 1 gagal: ${swalText}`);
+      // Cek validation error inline
+      const inlineError = await page.evaluate(() => {
+        const el = document.querySelector(".invalid-feedback:not([style*='display: none']), .is-invalid + .invalid-feedback");
+        return el ? el.textContent?.trim() : null;
+      });
+      if (inlineError) throw new Error(`Validasi step 1 gagal: ${inlineError}`);
+      throw new Error("Step 2 tidak muncul setelah submit step 1 — kemungkinan validasi server gagal");
+    }
+
+    // Intercept response AJAX step-2
+    const step2ResponsePromise = page.waitForResponse(
+      (r) => r.url().includes("/complaint/create-step-2") && r.request().method() === "POST",
+      { timeout: 30000 }
+    ).catch(() => null);
 
     await page.locator("#form-step2").waitFor({ state: "visible", timeout: 10000 });
     await page.locator('#form-step2 button[type="submit"]').click();
-    await page.locator("#step3-content").waitFor({ state: "visible", timeout: 15000 });
+
+    const step2Response = await step2ResponsePromise;
+    if (step2Response && step2Response.status() >= 400) {
+      const body = await step2Response.text().catch(() => "");
+      throw new Error(`Step 2 AJAX gagal (HTTP ${step2Response.status()}): ${body.slice(0, 200)}`);
+    }
+
+    try {
+      await page.locator("#step3-content").waitFor({ state: "visible", timeout: 20000 });
+    } catch {
+      const swalText = await page.evaluate(() => {
+        const el = document.querySelector(".swal2-html-container, .swal2-content, .sweet-alert p");
+        return el ? el.textContent?.trim() : null;
+      });
+      if (swalText) throw new Error(`Step 2 gagal: ${swalText}`);
+      throw new Error("Step 3 tidak muncul setelah submit step 2");
+    }
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {

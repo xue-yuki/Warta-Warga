@@ -99,6 +99,11 @@ Visual style:
 }
 
 export async function generateAndSavePoster(record, { imageId } = {}) {
+  // Matikan generate poster via env IMAGE_GEN_ENABLED=false
+  if ((process.env.IMAGE_GEN_ENABLED ?? 'true') === 'false') {
+    return null;
+  }
+
   const apiKey = config.images.apiKey;
   const baseUrl = config.images.baseUrl;
   const model = config.images.model;

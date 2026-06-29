@@ -2,24 +2,34 @@
   "cookies": [
     {
       "name": "XSRF-TOKEN",
-      "value": "eyJpdiI6InhiR2pnemlYUlRZaFh2KzU2RWdGWlE9PSIsInZhbHVlIjoiNFBqeURpQTQ4WXAvL0xWbHJkOXFRTHlCc0ZweEt3QVlRQUszN1pwWmJKeW9rbS9ZTkppSkxlYTlXMmsvTnNUTjRHRWhTME9TdVNaSHRoakllNFJCdzd6T2VyTlBOVzVXMjI0RzVLeG1ydG5qUHc0U0h5enY0NUtSUVFTRUhINEUiLCJtYWMiOiIzMGQ1ZGJjMzQ4YTNhNTkyZjBkOGUwN2U5MzU4YjZiMjZmMGUyOGI1MjNiYzAwNDRjZWM0Yzk0NDU3NjQ4YTNkIiwidGFnIjoiIn0%3D",
+      "value": "eyJpdiI6InJ2TzJodWhIRUw5WHRXSm1xREQxQmc9PSIsInZhbHVlIjoiOWozdm8rZjBsdHZSRmh3WUJCazQyU0xrd000ZHl0VUJzUlZuRW45akNPUysyWHBXRTE5TWRsZHlIT0lDVkI5RWJVSnFYL2FhNXYzZ1hicDllRzFBLzlWYUM5VG9YRHRsT0JRcDE5ODMrMXltOEx1aDZQWVZxSVY1ZHd0UXNtTlgiLCJtYWMiOiI5MTllMGJmZmY4ODEzZDc3MmFkNGVlNGUwMGQ5Mzk3MzUxZjVkOGY0MGIyZDcxMTU5ZDZmNmRmMmI4MWJlMTFkIiwidGFnIjoiIn0%3D",
       "domain": "laporgub.jatengprov.go.id",
       "path": "/",
-      "expires": 1783282177.113832,
+      "expires": 1783335655.108206,
       "httpOnly": false,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "laporgub_session",
-      "value": "eyJpdiI6ImtxVFlqeWZPMHdDWERLbGRGa1RHdHc9PSIsInZhbHVlIjoiNVZBMjRrRlBuUW1NNGxVQ0pUZUF4L202U0IyQjN2TXdBUE9hK2tOZ2dwME9TVXpTWlkzRGc2VTUvdFdkclpXcGppYW4zVHVqYXB0QWRqUXc1ZkdOTWwrNjhhZS9DK3Qzck1lTGFjdlBxZUc3SFkwM2NRRUkrUmpVVGJvTHkyQm8iLCJtYWMiOiI3M2U0NjRjZDk0ZDE2OWNmNTViNjdmMjYzMjllNTQ5YTNiZDY5ZjYwNTRhZjExODJmOTBmMjViZmZhZGE1YTY2IiwidGFnIjoiIn0%3D",
+      "value": "eyJpdiI6IlQxblpVZ1NUMzJ5ZWdQTWdhSWNXblE9PSIsInZhbHVlIjoiUTVSbUFDaFhMakcySjkzK3ZVd21qa3B2eHJkUGVyQkthcW5wNTFRY1ExVUR5cmtiQTUyZDkwcS9JUG1yUEExU3IvOFJuQngwQ3haRW4zNDFZUVJ6WWx0Smc5TU4rUDNPS0l3TU1aMFZwNjNiNnFxRm01SGhuczMxU2gyYVNxY1oiLCJtYWMiOiIwNjY1ZGJiMDNkNGVjYmM5Y2UxN2MyOTY5OTAzM2Q2NjE1Yjk3N2MzZWViNDUyZjFlOWY5NjdkY2ZkNjdkZjgyIiwidGFnIjoiIn0%3D",
       "domain": "laporgub.jatengprov.go.id",
       "path": "/",
-      "expires": 1783282177.114093,
+      "expires": 1783335655.108375,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"
     }
   ],
-  "origins": []
+  "origins": [
+    {
+      "origin": "https://laporgub.jatengprov.go.id",
+      "localStorage": [
+        {
+          "name": "fslightbox-scrollbar-width",
+          "value": "0"
+        }
+      ]
+    }
+  ]
 }

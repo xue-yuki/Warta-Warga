@@ -15,6 +15,7 @@ Saya bisa bantu:
 1️⃣ *Tanya info bansos* — mis. "syarat PKH apa?" atau "ada bansos di daerahku?"
 2️⃣ *Cek kabar* — kirim kabar yang kamu ragukan, mis. "ini benar nggak: ada bantuan 600rb klik link..."
 3️⃣ *Lapor penipuan* — modus yang lagi marak (ngaku petugas/bank, link palsu, minta OTP/transfer, dll). Kalau valid, saya sebar peringatan ke grup daerahmu setelah ditinjau pengurus.
+4️⃣ *Lapor layanan publik* — jalan rusak, listrik mati, air PDAM, sampah, dll. Saya bantu kirim ke portal resmi (LaporGub untuk wilayah Jawa Tengah).
  
 Semua jawaban bersumber dari info resmi (.go.id/Kemensos) dan selalu saya cantumkan sumbernya. Saya *tidak* menyimpan data pribadimu. 🙏`;
 
@@ -121,7 +122,7 @@ export async function respondToMessage({ text, konteks, scopeTags = null, wilaya
   }
 
   const history = getHistory(sessionId); // ingatan obrolan efemeral (RAM) → multi-turn natural
-  const r = await think(text, { history, scopeTags, wilayahTag });
+  const r = await think(text, { history, scopeTags, wilayahTag, sessionId });
 
   // LAPIS 4 (output guard): balasan tak boleh memuat kode (jaring akhir bila injeksi lolos).
   let reply = r.reply;
