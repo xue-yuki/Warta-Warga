@@ -2,7 +2,7 @@ import { config, hasLLM, hasSearch } from '../config.js';
 import { ingestUrl } from './index.js';
 import { extractLinks } from './fetch.js';
 import { searchOfficialSources } from './search.js';
-import { broadcastNewInfos } from './broadcast.js';
+import { broadcastNewInfos, broadcastPendingPeringatan } from './broadcast.js';
 import { humanWilayah } from '../util/wilayah.js';
 import { listSumberCrawl } from '../db/index.js';
 
@@ -10,7 +10,17 @@ import { listSumberCrawl } from '../db/index.js';
 // strukturkan via LLM, lalu segarkan Knowledge Base. Re-scrape = REFRESH (dedup by sumber_url).
 
 let _timer = null;
+let _pendingTimer = null;
 let _running = false;
+
+async function maybeBroadcastFreshInfos(fresh, { reason } = {}) {
+  if (!fresh.length) return;
+  if (!config.newInfoBroadcast.auto) {
+    console.log(`[Broadcast] Auto-broadcast info baru NONAKTIF (${fresh.length} info tersimpan, reason=${reason}).`);
+    return;
+  }
+  await broadcastNewInfos(fresh).catch((e) => console.warn('[Broadcast] gagal:', e?.message));
+}
 
 /** Baca daftar sumber dari DB (menggantikan sources.json). */
 export async function loadSources() {
@@ -80,8 +90,7 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
     _running = false;
   }
   console.log(`[Agent1] ✅ Auto-scrape selesai (${reason}): ${ok} tersimpan, ${skip} dilewati.`);
-  // Sebarkan info BARU ke grup terdaftar (dedup di dalam broadcastNewInfos).
-  await broadcastNewInfos(fresh).catch((e) => console.warn('[Broadcast] gagal:', e?.message));
+  await maybeBroadcastFreshInfos(fresh, { reason });
   return { total: sources.length, ok, skip };
 }
 
@@ -107,11 +116,24 @@ export function startAutoScrape() {
   }, ms);
   _timer.unref?.(); // jangan menahan proses tetap hidup hanya karena timer
   console.log(`[Agent1] ⏱️  Auto-scrape aktif tiap ${config.scrape.intervalHours} jam.`);
+
+  if (config.pendingBroadcast.autoPolling) {
+    const minutes = Math.max(1, config.pendingBroadcast.intervalMinutes);
+    _pendingTimer = setInterval(() => {
+      broadcastPendingPeringatan().catch((e) => console.warn('[PendingBroadcast] gagal:', e?.message));
+    }, minutes * 60 * 1000);
+    _pendingTimer.unref?.();
+    console.log(`[PendingBroadcast] Auto-polling aktif tiap ${minutes} menit.`);
+  } else {
+    console.log('[PendingBroadcast] Auto-polling NONAKTIF. Gunakan tombol dashboard untuk broadcast manual.');
+  }
 }
 
 export function stopAutoScrape() {
   if (_timer) clearInterval(_timer);
   _timer = null;
+  if (_pendingTimer) clearInterval(_pendingTimer);
+  _pendingTimer = null;
 }
 
 /**
@@ -155,7 +177,6 @@ export async function scrapeRegion(daerah, wilayahTag) {
     }
   }
   console.log(`[Agent1] ✅ On-demand "${label}": ${ok}/${list.length} tersimpan.`);
-  // Info daerah yang baru ditemukan juga disebar ke grup wilayah itu (bukan cuma ke penanya).
-  await broadcastNewInfos(fresh).catch((e) => console.warn('[Broadcast] gagal:', e?.message));
+  await maybeBroadcastFreshInfos(fresh, { reason: 'on-demand' });
   return { ok, found: list.length, urls: list };
 }

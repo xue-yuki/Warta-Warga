@@ -16,6 +16,7 @@
     "scrape": "node src/scrape.js",
     "demo": "node scripts/demo.js",
     "demo:broadcast": "node scripts/demo-broadcast.js",
+    "demo:wa-validation": "node scripts/demo-wa-validation.js",
     "demo:crawl-broadcast": "node scripts/demo-crawl-broadcast-12h.js",
     "e2e:broadcast": "node scripts/e2e-broadcast.js",
     "demo:lapor": "node scripts/demo-lapor.js",

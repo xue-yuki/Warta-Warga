@@ -42,6 +42,36 @@ const UNVERIFIED_FALLBACK = {
     'Klaim ini belum bisa dipastikan dari sumber resmi terkurasi. Jangan transfer uang atau memberi data pribadi dulu — konfirmasikan ke RT/instansi terkait.',
 };
 
+function normalizeFactText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/rp\s*200[.\s]*000|200\s*ribu|rp\s*200\s*ribu/g, 'rp200000')
+    .replace(/kartu keluarga sejahtera/g, 'kks');
+}
+
+function deterministicVerified(claim, context) {
+  const q = normalizeFactText(claim);
+  const c = normalizeFactText(context);
+
+  // BPNT/Sembako facts are short and explicit in the official chunk. Verify only when
+  // the user's claim and the source context both contain the core facts together.
+  const asksBpnt =
+    /\b(bpnt|sembako|bantuan pangan|e-?warong|kks)\b/i.test(q) &&
+    q.includes('rp200000') &&
+    /e-?warong/i.test(q) &&
+    q.includes('kks');
+  const sourceSupportsBpnt =
+    /\b(bpnt|sembako|bantuan pangan)\b/i.test(c) &&
+    c.includes('rp200000') &&
+    /e-?warong/i.test(c) &&
+    c.includes('kks');
+
+  if (asksBpnt && sourceSupportsBpnt) {
+    return 'BPNT/Sembako adalah bantuan senilai Rp200.000 per bulan lewat KKS untuk belanja bahan pangan di e-warong.';
+  }
+  return null;
+}
+
 /**
  * Periksa sebuah klaim → satu label + alasan + sumber.
  * @returns {Promise<{label:string, emoji:string, judul:string, alasan:string, sources:string[], text:string}>}
@@ -55,6 +85,18 @@ export async function checkClaim(claim, { scopeTags = null, history = [] } = {})
   const sources = [...new Set(hits.map((h) => h.sumber_url))];
   const updated = latestTanggal(hits);
   const context = hits.map((h, i) => `[${i + 1}] (sumber: ${h.sumber_url})\n${h.content}`).join('\n\n');
+  const deterministic = deterministicVerified(claim, context);
+  if (deterministic) {
+    return format(
+      {
+        label: 'verified',
+        alasan: 'Klaim ini cocok dengan info bansos resmi yang ada di sumber terkurasi.',
+      },
+      sources,
+      deterministic,
+      updated,
+    );
+  }
 
   if (!hasLLM()) {
     // Tanpa LLM tidak boleh menebak contradiction → konservatif ⚠️ tapi sajikan info terkait.

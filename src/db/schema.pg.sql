@@ -56,9 +56,12 @@ CREATE TABLE IF NOT EXISTS laporan (
   jumlah_serupa    INTEGER NOT NULL DEFAULT 1,
   status_approval  TEXT NOT NULL DEFAULT 'menunggu',
   dasar_verifikasi TEXT,
+  sumber_urls      TEXT,
   teks_peringatan  TEXT,
   timestamp        TEXT NOT NULL,
-  updated_ts       TEXT
+  updated_ts       TEXT,
+  embedding        JSONB,                      -- float[] (L2-normalized) untuk cosine clustering
+  cluster_reason   TEXT                        -- 'modus_key' | 'cosine' | 'similar_text' | NULL (baris baru)
 );
 
 CREATE TABLE IF NOT EXISTS peringatan_terkirim (

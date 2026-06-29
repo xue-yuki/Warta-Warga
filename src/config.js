@@ -65,9 +65,26 @@ export const config = {
   // Agent 1 auto-scrape: pindai data/sources.json secara berkala.
   scrape: {
     enabled: (process.env.SCRAPE_AUTO ?? "true") !== "false", // default nyala
-    onBoot: (process.env.SCRAPE_ON_BOOT ?? "true") !== "false", // scrape sekali saat start
+    onBoot: (process.env.SCRAPE_ON_BOOT ?? "false") === "true", // default mati agar bot start tidak scrape/spam
     intervalHours: Number(process.env.SCRAPE_INTERVAL_HOURS || 12),
     sourcesPath: abs(process.env.SCRAPE_SOURCES || "./data/sources.json"),
+  },
+
+  // Broadcast info bansos baru dari hasil scrape/on-demand default mati.
+  // Ini mencegah seed/synthetic/fresh scrape langsung generate poster dan spam grup.
+  newInfoBroadcast: {
+    auto: (process.env.NEW_INFO_BROADCAST_AUTO ?? "false") === "true",
+  },
+
+  onDemandDiscovery: {
+    enabled: (process.env.ON_DEMAND_DISCOVERY ?? "false") === "true",
+  },
+
+  // Auto-polling broadcast pending sengaja default mati. Gunakan tombol dashboard
+  // untuk sebar manual agar laporan approved dari Supabase tidak memicu loop.
+  pendingBroadcast: {
+    autoPolling: (process.env.PENDING_BROADCAST_AUTO ?? "false") === "true",
+    intervalMinutes: Number(process.env.PENDING_BROADCAST_INTERVAL_MINUTES || 5),
   },
 
   // Web search untuk on-demand discovery sumber daerah baru.
