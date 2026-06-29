@@ -5,7 +5,7 @@ import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, Disconn
 import { config, hasSearch, hasVision } from "../config.js";
 import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
-import { handleLaporKonten } from "../agent2/lapor-konten.js";
+import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
 import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
@@ -48,6 +48,18 @@ let _guardsInstalled = false;
 function installProcessGuards() {
   if (_guardsInstalled) return;
   _guardsInstalled = true;
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args) => {
+    const message = args.map((arg) => (arg instanceof Error ? arg.message : String(arg || ""))).join(" ");
+    if (
+      /Failed to decrypt message with any known session/i.test(message) ||
+      /Session error:.*(?:Bad MAC|MessageCounterError|Key used already or never filled)/i.test(message)
+    ) {
+      if (process.env.WA_DEBUG_DECRYPT === "true") originalConsoleError(...args);
+      return;
+    }
+    originalConsoleError(...args);
+  };
   process.on("unhandledRejection", (err) => {
     console.warn("[bot] unhandledRejection diabaikan:", err?.message || err);
   });
@@ -405,6 +417,8 @@ async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null,
  * picu on-demand scraping: balas 'bentar ya' lalu follow-up otomatis setelah datanya ketemu.
  */
 async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, justGreeted, send, sessionId, imageText = null, imageBuffer = null, imageMimetype = null, messageId = null, quoted = null }) {
+  rememberAduanKontenUrlFromText(sessionId, [text, imageText].filter(Boolean).join("\n\n"));
+
   // Daerah spesifik yang disebut user (atau wilayah grup) yang belum punya data lokal.
   const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
   const uncovered = target && isKabKota(target) && (await countInfoByWilayah(target)) === 0;
@@ -460,7 +474,10 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
     return;
   }
 
-  if (result.reply) await send(result.reply);
+  if (result.reply) {
+    const reply = await maybeOfferAduanKontenReport({ text, reply: result.reply, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+    await send(reply);
+  }
 }
 
 /** Proses latar belakang: scrape daerah lewat web search, lalu kirim follow-up berisi hasilnya. */

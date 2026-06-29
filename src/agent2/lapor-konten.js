@@ -8,14 +8,16 @@ import { ADUANKONTEN_CATEGORIES, submitAduanKonten } from "../portal/aduankonten
 import { inspectUrl } from "./checkurl.js";
 
 const URL_RE = /\b(?:https?:\/\/[^\s<>"'`]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"'`]*)?)/i;
-const REPORT_WORDS = /\b(lapor|laporkan|pengaduan|aduan|adukan|report|blokir|blokirkan|takedown|take\s*down)\b/i;
+const REPORT_WORDS = /\b(lapor(?:kan|in)?|pengaduan|aduan|adukan|report|blokir|blokirkan|takedown|take\s*down)\b/i;
 const EXPLICIT_ADUANKONTEN_HINTS = /\b(aduan\s*konten|konten\s*negatif|blokir|blokirkan|takedown|take\s*down)\b/i;
 const WEB_REPORT_HINTS = /\b(situs|website|web|url|link|domain|akun|aplikasi)\b/i;
 const NEGATIVE_CONTENT_HINTS = /\b(judi|slot|togel|casino|taruhan|betting|penipuan|phishing|scam|hoaks|hoax|pinjol\s*ilegal|investasi\s*ilegal|pornografi|porno|pemerasan|malware|retas|kebocoran\s*data)\b/i;
 const GAMBLING_SITE_HINTS = /(?:\b(judi|slot|togel|casino|taruhan|betting|gacor|maxwin|scatter|pragmatic|pgsoft|habanero|spadegaming|sbobet|poker|roulette|blackjack|jackpot|zeus|olympus)\b|rtp\s*slot|mahjong\s*ways|starlight\s*princess|\bslot\d+\b|\bdewa\d+[a-z0-9-]*\b)/i;
 const PENDING_TTL = 15 * 60 * 1000;
+const RECENT_URL_TTL = 30 * 60 * 1000;
 
 const pendingKonten = new Map();
+const recentKontenUrls = new Map();
 
 function getPending(sessionId) {
   if (!sessionId) return null;
@@ -33,7 +35,7 @@ export function hasPendingLaporKonten(sessionId) {
 }
 
 function isAffirmative(text) {
-  return /\b(ya|oke|ok|iya|yes|betul|lanjut|kirim)\b/i.test(text || "");
+  return /\b(ya|oke|ok|iya|yes|betul|lanjut|kirim|lapor(?:kan|in)?|gas|setuju)\b/i.test(text || "");
 }
 
 function isNegative(text) {
@@ -49,6 +51,31 @@ function cleanUrl(raw) {
 function extractUrl(text) {
   const match = String(text || "").match(URL_RE);
   return match ? cleanUrl(match[0]) : null;
+}
+
+function rememberKontenUrl(sessionId, url) {
+  if (!sessionId || !url) return;
+  recentKontenUrls.set(sessionId, { url: cleanUrl(url), ts: Date.now() });
+}
+
+function recentKontenUrl(sessionId) {
+  if (!sessionId) return null;
+  const data = recentKontenUrls.get(sessionId);
+  if (!data) return null;
+  if (Date.now() - data.ts > RECENT_URL_TTL) {
+    recentKontenUrls.delete(sessionId);
+    return null;
+  }
+  return data.url;
+}
+
+function isContextualReportIntent(text) {
+  const raw = String(text || "");
+  return REPORT_WORDS.test(raw) && (WEB_REPORT_HINTS.test(raw) || /\b(tadi|barusan|sebelumnya|itu|tersebut|aneh|bahaya|mencurigakan)\b/i.test(raw));
+}
+
+function isDangerousUrlReply(reply) {
+  return /\b(BAHAYA|jangan buka|berbahaya|penipuan|phishing|scam|judi|slot|togel|casino|konten negatif|link mencurigakan|situs mencurigakan)\b/i.test(String(reply || ""));
 }
 
 function normalizeCategoryKey(value) {
@@ -110,7 +137,7 @@ function stripUrlFromText(text, url) {
   return String(text || "")
     .replace(url || "", "")
     .replace(URL_RE, "")
-    .replace(/\b(lapor|laporkan|pengaduan|aduan|adukan|report|blokir|blokirkan|takedown|take\s*down)\b/gi, "")
+    .replace(/\b(lapor(?:kan|in)?|pengaduan|aduan|adukan|report|blokir|blokirkan|takedown|take\s*down)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -333,6 +360,12 @@ function isAduanKontenIntent(text) {
   return false;
 }
 
+export function rememberAduanKontenUrlFromText(sessionId, text) {
+  const url = extractUrl(text);
+  if (url) rememberKontenUrl(sessionId, url);
+  return url;
+}
+
 const ASK_URL = "Kirim URL/domain/akun yang ingin dilaporkan ke aduankonten.id.";
 const ASK_REASON = "Tambahkan alasan laporannya minimal 20 huruf. Contoh: situs ini mempromosikan judi online atau diduga phishing.";
 const ASK_CONFIRM = (categoryKey, url, reason) => {
@@ -379,9 +412,24 @@ export async function handleLaporKonten({ text, imageText = null, imageBuffer = 
     return consumeLaporKontenReply({ sessionId, text, imageText, imageBuffer, imageMimetype, messageId });
   }
 
-  if (!isAduanKontenIntent(text)) return null;
+  let message = [text, imageText].filter(Boolean).join("\n\n");
+  const directUrl = extractUrl(message);
+  if (directUrl) rememberKontenUrl(sessionId, directUrl);
 
-  const message = [text, imageText].filter(Boolean).join("\n\n");
+  if (!directUrl && isContextualReportIntent(message)) {
+    const rememberedUrl = recentKontenUrl(sessionId);
+    if (rememberedUrl) {
+      message = `${message}\n${rememberedUrl}`;
+    } else {
+      const parsed = await parseLaporKonten(message);
+      const data = buildData(parsed, null, { imageText, imageBuffer, imageMimetype, messageId });
+      pendingKonten.set(sessionId, { stage: "url", data, ts: Date.now() });
+      return { reply: ASK_URL };
+    }
+  } else if (!isAduanKontenIntent(message)) {
+    return null;
+  }
+
   const parsed = await parseLaporKonten(message);
   let data = buildData(parsed, null, { imageText, imageBuffer, imageMimetype, messageId });
   data = await enrichWithUrlInspection(data, message);
@@ -398,6 +446,22 @@ export async function handleLaporKonten({ text, imageText = null, imageBuffer = 
 
   pendingKonten.set(sessionId, { stage: "confirm", data, ts: Date.now() });
   return { reply: ASK_CONFIRM(data.categoryKey, data.url, data.reason) };
+}
+
+export async function maybeOfferAduanKontenReport({ text, reply, imageText = null, imageBuffer = null, imageMimetype = null, sessionId = null, messageId = null }) {
+  const message = [text, imageText].filter(Boolean).join("\n\n");
+  const url = extractUrl(message);
+  if (!url || !reply || !isDangerousUrlReply(reply)) return reply;
+  if (getPending(sessionId)) return reply;
+
+  rememberKontenUrl(sessionId, url);
+  const parsed = await parseLaporKonten(`laporkan link ini ${url}`);
+  let data = buildData(parsed, null, { imageText, imageBuffer, imageMimetype, messageId });
+  data = await enrichWithUrlInspection(data, message);
+
+  if (!data?.url || !data?.reason) return reply;
+  pendingKonten.set(sessionId, { stage: "confirm", data, ts: Date.now() });
+  return `${reply}\n\n${ASK_CONFIRM(data.categoryKey, data.url, data.reason)}`;
 }
 
 async function consumeLaporKontenReply({ sessionId, text, imageText = null, imageBuffer = null, imageMimetype = null, messageId = null }) {
