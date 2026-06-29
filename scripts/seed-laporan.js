@@ -1,4 +1,6 @@
 // Seed 30 laporan aduan warga (penipuan/hoaks bansos) di level kabupaten/kota.
+// Tiga laporan tambahan digabung ke baris seed lewat cosine similarity agar dashboard
+// punya contoh cluster_reason='cosine' dan jumlah_serupa > 1.
 // Data anonim: tidak ada nama, nomor HP, NIK, alamat detail, atau identitas pelapor.
 //
 // Kenapa kabupaten/kota, bukan provinsi:
@@ -9,7 +11,16 @@
 //   npm run seed:laporan
 
 import postgres from 'postgres';
-import { initDb, insertLaporan, trendingModus, listAntrianApproval, getDb } from '../src/db/index.js';
+import {
+  initDb,
+  insertLaporan,
+  bumpLaporanSerupa,
+  getLaporan,
+  trendingModus,
+  listAntrianApproval,
+  getDb,
+} from '../src/db/index.js';
+import { embed, cosine } from '../src/embeddings/index.js';
 import { hasSupabase, config } from '../src/config.js';
 
 const SEED_MARKER = 'Seed demo laporan kabupaten/kota';
@@ -82,6 +93,33 @@ const wilayahSeed = [
   { label: 'Kota Jayapura', tag: 'kabupaten:jayapura', modusKey: 'ngaku_petugas' },
 ];
 
+const cosineSeedReports = [
+  {
+    label: 'Kota Medan',
+    wilayahTag: 'kabupaten:medan',
+    isiRingkas:
+      'Beredar tautan pendaftaran bansos di Kota Medan yang meminta warga mengisi data keluarga dan kode OTP untuk verifikasi penerima bantuan.',
+    teksPeringatan:
+      'Jangan isi data keluarga atau OTP melalui tautan pendaftaran bansos yang tidak jelas. Cek hanya kanal resmi pemerintah.',
+  },
+  {
+    label: 'Kabupaten Banyumas',
+    wilayahTag: 'kabupaten:banyumas',
+    isiRingkas:
+      'Warga Kabupaten Banyumas diminta transfer uang jaminan supaya namanya masuk daftar penerima bantuan tunai sosial.',
+    teksPeringatan:
+      'Penetapan penerima bansos tidak memakai uang jaminan. Tolak permintaan transfer dan laporkan ke pengurus setempat.',
+  },
+  {
+    label: 'Kota Padang',
+    wilayahTag: 'kabupaten:padang',
+    isiRingkas:
+      'Ada pihak di Kota Padang mengaku petugas pendamping bantuan, menawarkan percepatan pencairan, dan meminta dokumen pribadi warga.',
+    teksPeringatan:
+      'Verifikasi identitas petugas lewat RT/RW, kelurahan, atau dinas sosial sebelum menyerahkan dokumen pribadi.',
+  },
+];
+
 async function clearOldSeedRows() {
   if (hasSupabase()) {
     const sql = postgres(config.supabase.dbUrl, { ssl: 'require', prepare: false, max: 1 });
@@ -101,6 +139,32 @@ async function clearOldSeedRows() {
     .run(`${SEED_MARKER}%`).changes;
 }
 
+async function seedCosineClusterReport(report, targetId) {
+  const target = await getLaporan(targetId);
+  const targetVec = target?.embedding
+    ? (typeof target.embedding === 'string' ? JSON.parse(target.embedding) : target.embedding)
+    : null;
+  const reportVec = await embed(report.isiRingkas);
+  const score = targetVec ? cosine(reportVec, targetVec) : 0;
+
+  if (score < 0.75) {
+    throw new Error(`Seed cosine gagal: skor ${report.label} hanya ${score.toFixed(3)}.`);
+  }
+
+  const updated = await bumpLaporanSerupa(targetId, {
+    dasarVerifikasi: `${SEED_MARKER}: laporan tambahan sengaja dibuat mirip secara semantik untuk demo cosine similarity.`,
+    teksPeringatan: report.teksPeringatan,
+    clusterReason: 'cosine',
+  });
+
+  return {
+    id: updated.id,
+    label: report.label,
+    score,
+    jumlahSerupa: updated.jumlah_serupa,
+  };
+}
+
 async function main() {
   await initDb();
   console.log(`Seed laporan aduan warga level kabupaten/kota -> ${hasSupabase() ? 'Supabase/Postgres' : `SQLite ${config.dbPath}`}`);
@@ -109,9 +173,10 @@ async function main() {
   if (deleted) console.log(`Bersihkan seed demo lama: ${deleted} laporan dihapus.`);
 
   let ok = 0;
+  const seededIdsByTag = new Map();
   for (const item of wilayahSeed) {
     const template = templates[item.modusKey];
-    await insertLaporan({
+    const id = await insertLaporan({
       isiRingkas: template.isi(item.label),
       modusKey: item.modusKey,
       wilayahTag: item.tag,
@@ -119,13 +184,25 @@ async function main() {
       dasarVerifikasi: `${SEED_MARKER}: pola laporan warga mengandung ciri penipuan bansos (biaya/transfer/OTP/link tidak resmi).`,
       teksPeringatan: template.peringatan,
     });
+    seededIdsByTag.set(item.tag, id);
     ok += 1;
+  }
+
+  const cosineClusters = [];
+  for (const report of cosineSeedReports) {
+    cosineClusters.push(await seedCosineClusterReport(report, seededIdsByTag.get(report.wilayahTag)));
   }
 
   const antrian = await listAntrianApproval();
   const tren = await trendingModus({ days: 30, limit: 8 });
 
   console.log(`${ok}/${wilayahSeed.length} laporan tersimpan.`);
+  console.log(`${cosineClusters.length} laporan tambahan digabung via cosine similarity:`);
+  for (const cluster of cosineClusters) {
+    console.log(
+      `- ${cluster.label} -> laporan #${cluster.id}, score=${cluster.score.toFixed(3)}, jumlah_serupa=${cluster.jumlahSerupa}`,
+    );
+  }
   console.log(`Antrian approval jelas_penipuan: ${antrian.length} laporan.`);
   console.log('Wilayah seed:');
   for (const item of wilayahSeed) {

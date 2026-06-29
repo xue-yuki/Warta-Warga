@@ -110,7 +110,8 @@ TOOLS — PAKAI DENGAN INISIATIFMU
   → Kalau belum jelas → tanya dulu, jangan catat dulu.
   → tingkat_bahaya: "jelas_penipuan" atau "belum_pasti".
   → WAJIB tanpa identitas (tanpa nama/nomor/alamat).
-  → Setelah sukses: bilang laporan diterima & akan ditinjau pengurus sebelum disebar.
+  → Setelah sukses: JANGAN hanya bilang "laporan dicatat".
+  → Wajib jawab dengan penilaian sederhana dulu (penipuan / hati-hati), alasan singkat, langkah aman, lalu baru bilang laporan diterima & akan ditinjau pengurus sebelum disebar.
 
 CARA VERIFIKASI — SAMPAIKAN SEDERHANA
 JANGAN pakai label teknis. Sampaikan langsung:
@@ -238,6 +239,39 @@ const FALLBACK_REPLY =
   'Maaf, lagi ada gangguan di sistemku 🙏 Coba kirim lagi pesannya sebentar ya. ' +
   'Aku bisa bantu info bansos atau cek kabar/laporan penipuan.';
 
+function safeToolText(value) {
+  return String(value || '')
+    .replace(/\bnik\s*:?\s*\d[\d\s.\-]*\d/gi, '[data disensor]')
+    .replace(/\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g, '[data disensor]')
+    .replace(/\b\d[\d .\-]{7,}\d\b/g, '[data disensor]')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function formatCatatLaporanReply(args, result) {
+  const danger = args.tingkat_bahaya === 'jelas_penipuan';
+  const conclusion = danger
+    ? '🚨 INI PENIPUAN. Jangan dilanjutkan.'
+    : '⚠️ HATI-HATI. Ini belum bisa dipastikan aman.';
+  const modus = safeToolText(args.ringkasan_modus) || 'Ada modus mencurigakan yang dilaporkan warga.';
+  const warning = safeToolText(args.teks_peringatan);
+  const wilayah = result?.wilayah ? ` untuk wilayah *${result.wilayah}*` : '';
+
+  return `${conclusion}
+
+Kenapa bahaya:
+• ${modus}
+• Modus seperti ini bisa dipakai untuk mencuri uang, data pribadi, atau isi HP Bapak/Ibu.
+
+🔢 Yang harus Bapak/Ibu lakukan SEKARANG:
+1. Jangan klik link, file APK, atau tombol apa pun dari pesan itu.
+2. Jangan kirim OTP, PIN, password, NIK, atau uang.
+3. Blokir pengirimnya.
+4. Kalau sudah terlanjur klik/install/kirim data, 📞 hubungi keluarga sekarang dan segera telepon bank.
+
+${warning ? `💡 Ingat: ${warning}\n\n` : ''}✅ Laporan Bapak/Ibu sudah saya catat${wilayah}. Nanti ditinjau pengurus dulu sebelum peringatan disebar ke warga lain.`;
+}
+
 // Penegak grounding (#1): deteksi balasan yang MENGKLAIM fakta/angka bansos. Kalau ini muncul tanpa
 // pernah memanggil cari_sumber_resmi → kemungkinan dari pengetahuan umum LLM (rawan halu) → paksa cari.
 const BANSOS_TERM = /\b(pkh|bpnt|sembako|pip|kis|kip|blt|bst|pbi|bansos|bantuan sosial|program keluarga harapan|dtks|dtsen)\b/i;
@@ -273,6 +307,7 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
   let grounded = false;
   let searched = false; // apakah cari_sumber_resmi sudah dipanggil giliran ini?
   let nudgedGrounding = false; // penegak grounding hanya sekali (cegah loop)
+  let catatLaporanReply = null;
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -298,6 +333,9 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           continue;
         }
 
+        if (catatLaporanReply) {
+          reply = catatLaporanReply;
+        }
         reply = mdToWA(maybeAppendSumber(sanitizeUrls(reply, allowedUrls), usedSources));
         return { reply, aksi, label: null, grounded };
       }
@@ -345,11 +383,17 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           result = JSON.stringify(r);
         } else if (tc.function?.name === 'catat_laporan') {
           aksi = 'lapor';
-          result = JSON.stringify(await simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags }));
+          const toolResult = await simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags });
+          if (toolResult?.ok) catatLaporanReply = formatCatatLaporanReply(args, toolResult);
+          result = JSON.stringify(toolResult);
         } else {
           result = 'Tool tidak dikenal.';
         }
         messages.push({ role: 'tool', tool_call_id: tc.id, content: String(result) });
+      }
+      if (catatLaporanReply) {
+        const reply = mdToWA(maybeAppendSumber(sanitizeUrls(catatLaporanReply, allowedUrls), usedSources));
+        return { reply, aksi, label: null, grounded };
       }
     }
   } catch (err) {

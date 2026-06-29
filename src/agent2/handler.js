@@ -6,6 +6,8 @@ import { think } from './brain.js';
 import { logInteraksi } from '../db/index.js';
 import { getHistory, pushTurn } from './convo.js';
 import { isInjection, isOffTopicTask, looksLikeCode, REFUSAL_REPLY } from './guard.js';
+import { humanWilayah } from '../util/wilayah.js';
+import { consumeLaporReply, handleLapor } from './lapor.js';
 
 export const GREETING = `👋 Halo! Saya *Warta Warga*, teman info bansos & waspada penipuan.
  
@@ -15,6 +17,45 @@ Saya bisa bantu:
 3️⃣ *Lapor penipuan* — modus yang lagi marak (ngaku petugas/bank, link palsu, minta OTP/transfer, dll). Kalau valid, saya sebar peringatan ke grup daerahmu setelah ditinjau pengurus.
  
 Semua jawaban bersumber dari info resmi (.go.id/Kemensos) dan selalu saya cantumkan sumbernya. Saya *tidak* menyimpan data pribadimu. 🙏`;
+
+const MENU_SELECTIONS = {
+  '1': {
+    aksi: 'info',
+    reply: ({ wilayahLabel }) =>
+      `Silakan, info bansos apa yang ingin Bapak/Ibu tanyakan${wilayahLabel ? ` untuk *${wilayahLabel}*` : ''}?\n\n` +
+      'Contoh: "Syarat PKH apa?" atau "Ada bansos apa di Kab. Banyumas?"',
+  },
+  '2': {
+    aksi: 'info',
+    reply: () =>
+      'Silakan kirim kabar, link, foto, atau pesan yang ingin Bapak/Ibu cek.\n\n' +
+      'Nanti saya bantu jelaskan apakah aman, belum pasti, atau berbahaya.',
+  },
+  '3': {
+    aksi: 'lapor',
+    reply: ({ wilayahLabel }) =>
+      `Silakan ceritakan penipuan yang ingin Bapak/Ibu laporkan${wilayahLabel ? ` di *${wilayahLabel}*` : ''}.\n\n` +
+      'Cukup ceritakan modusnya, misalnya: "ada yang mengaku polisi mengirim file APK" atau "ada yang minta OTP/transfer".\n' +
+      'Tidak perlu sebut nama, nomor HP, NIK, atau alamat lengkap.',
+  },
+};
+
+function menuSelection(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const symbol = raw.match(/^[\s.#]*(1|2|3)(?:[️⃣⃣\uFE0F]|\.)?(?:\s|$)/);
+  if (!symbol) return null;
+  return MENU_SELECTIONS[symbol[1]] || null;
+}
+
+function renderMenuReply(menu, wilayahTag) {
+  const wilayahLabel = wilayahTag ? humanWilayah(wilayahTag) : '';
+  return menu.reply({ wilayahLabel });
+}
+
+function isExplicitLaporIntent(text) {
+  return /\b(lapor|laporan|laporkan|laporin|melaporkan|ngelapor|ngelaporin|ngadu|aduan)\b/i.test(String(text || ''));
+}
 
 // Ringkasan respons bot untuk analytics (bot bicara PII-free) — buang baris meta & potong.
 function ringkasResp(reply) {
@@ -38,11 +79,45 @@ function ringkasResp(reply) {
  * @returns {Promise<{reply:string|null, jenis:string, aksi:string, label:string|null, grounded:boolean}>}
  */
 export async function respondToMessage({ text, konteks, scopeTags = null, wilayahTag = null, justGreeted = false, sessionId = null }) {
+  const pendingLapor = sessionId
+    ? await consumeLaporReply({ sessionId, text, wilayahTag, scopeTags })
+    : null;
+  if (pendingLapor?.reply) {
+    await logInteraksi({ konteks, jenis: 'lapor', aksi: 'lapor', label: 'lapor_pending', wilayahTag, ringkasResp: ringkasResp(pendingLapor.reply) });
+    pushTurn(sessionId, 'user', text);
+    pushTurn(sessionId, 'assistant', pendingLapor.reply);
+    return { reply: pendingLapor.reply, jenis: 'lapor', aksi: 'lapor', label: 'lapor_pending', grounded: false };
+  }
+
+  const menu = menuSelection(text);
+  if (menu) {
+    const reply = renderMenuReply(menu, wilayahTag);
+    if (menu.aksi === 'lapor' && sessionId) {
+      await handleLapor({ text: 'mau lapor', wilayahTag, scopeTags, sessionId });
+    }
+    await logInteraksi({ konteks, jenis: menu.aksi, aksi: menu.aksi, label: 'menu', wilayahTag, ringkasResp: ringkasResp(reply) });
+    if (sessionId) {
+      pushTurn(sessionId, 'user', text);
+      pushTurn(sessionId, 'assistant', reply);
+    }
+    return { reply, jenis: menu.aksi, aksi: menu.aksi, label: 'menu', grounded: false };
+  }
+
   // LAPIS 1+2 (security, deterministik pra-LLM): tangkal prompt-injection & tugas off-topic.
   // Ini SARINGAN KEAMANAN, bukan klasifikasi maksud — jawaban tetap/hardcoded agar tak bisa "dibujuk".
   if (isInjection(text) || isOffTopicTask(text)) {
     await logInteraksi({ konteks, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', wilayahTag });
     return { reply: REFUSAL_REPLY, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', grounded: false };
+  }
+
+  if (isExplicitLaporIntent(text)) {
+    const lapor = await handleLapor({ text, wilayahTag, scopeTags, sessionId });
+    await logInteraksi({ konteks, jenis: 'lapor', aksi: 'lapor', label: 'lapor_explicit', wilayahTag, ringkasResp: ringkasResp(lapor.reply) });
+    if (sessionId && lapor.reply) {
+      pushTurn(sessionId, 'user', text);
+      pushTurn(sessionId, 'assistant', lapor.reply);
+    }
+    return { reply: lapor.reply, jenis: 'lapor', aksi: 'lapor', label: 'lapor_explicit', grounded: false };
   }
 
   const history = getHistory(sessionId); // ingatan obrolan efemeral (RAM) → multi-turn natural

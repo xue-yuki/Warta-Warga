@@ -27,19 +27,89 @@ Prinsip PRD yang ditegakkan kode:
 - **Privasi by design**: tak ada tabel identitas warga; `log_interaksi` anonim; status "sudah disapa" hanya di memori.
 - **Stateless bot**: konteks grup/wilayah selalu di-fetch dari DB tiap event.
 
-## Setup
+## Setup Cepat
 
 ```bash
 npm install
-cp .env.example .env      # isi OPENROUTER_API_KEY bila ingin jawaban full-LLM
-npm run init              # init skema DB + cache config, tanpa menyalakan WhatsApp
-npm run seed              # isi KB dengan data sintetis (jalan tanpa API key)
-npm run demo              # uji Agent 2 di terminal (tanpa WhatsApp) 
-npm run bot               # nyalakan bot → scan QR di WhatsApp
+cp .env.example .env
+npm run init
+npm run seed
+npm run bot
 ```
+
+Isi `OPENROUTER_API_KEY` di `.env` bila ingin jawaban full-LLM. Untuk mode lokal/offline, kosongkan `SUPABASE_DB_URL` agar aplikasi memakai SQLite.
+
+Default aman untuk menjalankan bot:
+
+```bash
+SCRAPE_ON_BOOT=false
+NEW_INFO_BROADCAST_AUTO=false
+ON_DEMAND_DISCOVERY=false
+PENDING_BROADCAST_AUTO=false
+```
+
+Dengan konfigurasi ini, bot tidak scrape, tidak discovery daerah via web search, dan tidak broadcast otomatis saat project start. Broadcast laporan tetap bisa dilakukan manual dari dashboard.
 
 > Tanpa `OPENROUTER_API_KEY`, bot tetap jalan dengan **mode fallback** (klasifikasi heuristik + jawaban ekstraktif + klaim konservatif ⚠️). Untuk RAG/klaim penuh, isi key.
 > Embeddings default `local` (Xenova/all-MiniLM-L6-v2, unduh ~25MB sekali). Set `EMBEDDINGS_PROVIDER=hashing` untuk mode tanpa unduh.
+
+## Panduan `package.json`
+
+### Init DB & Data
+
+Gunakan command ini untuk menyiapkan database dan data awal.
+
+| Command | Fungsi | Aman untuk |
+|---|---|---|
+| `npm run init` | Inisialisasi schema database dan cek konfigurasi runtime. Tidak menyalakan WhatsApp. | Setup awal, verifikasi DB |
+| `npm run seed` | Isi Knowledge Base dengan data sintetis demo. | Demo lokal |
+| `npm run seed:data` | Alias dari `npm run seed`. | Demo lokal |
+| `npm run seed:laporan` | Isi data laporan penipuan/misinformasi untuk dashboard approval. | Demo fitur laporan |
+
+Catatan Supabase: kalau `SUPABASE_DB_URL` terisi, command DB akan mengarah ke Supabase/Postgres. Untuk test lokal yang tidak menyentuh cloud, jalankan dengan:
+
+```bash
+SUPABASE_DB_URL= npm run init
+SUPABASE_DB_URL= npm run seed
+```
+
+### Run Aplikasi
+
+Gunakan command ini untuk menjalankan service utama atau pekerjaan operasional.
+
+| Command | Fungsi | Catatan |
+|---|---|---|
+| `npm start` | Menjalankan aplikasi utama. | Sama dengan `npm run bot` |
+| `npm run bot` | Menyalakan WhatsApp bot, dashboard lokal, dan scheduler sesuai `.env`. | Scan QR WhatsApp saat pertama kali |
+| `npm run ingest -- ...` | Ingest satu URL/file resmi ke Knowledge Base. | Butuh sumber lolos whitelist |
+| `npm run scrape` | Jalankan scrape Agent 1 manual. | Butuh `OPENROUTER_API_KEY` untuk strukturisasi |
+| `npm run dashboard:demo` | Dashboard approval lokal dengan broadcaster console. | Tidak kirim WhatsApp sungguhan |
+| `npm run warmup:aduankonten` | Warm-up session/browser AduanKonten. | Untuk fitur portal AduanKonten |
+| `npm run migrate:supabase` | Migrasi data lokal ke Supabase. | Pastikan target `.env` benar sebelum menjalankan |
+
+### Test & Demo
+
+Command berikut dipakai untuk validasi perilaku tanpa menjalankan bot produksi penuh.
+
+| Command | Fungsi |
+|---|---|
+| `npm run demo` | Uji Agent 2 di terminal tanpa WhatsApp. |
+| `npm run demo:broadcast` | Demo alur broadcast lokal tanpa LLM/scrape live. |
+| `npm run demo:wa-validation` | Demo validasi registrasi dan perilaku WhatsApp. |
+| `npm run demo:crawl-broadcast` | Demo crawl sampai broadcast gambar. Gunakan `DEMO_ONCE=true` untuk sekali jalan. |
+| `npm run demo:lapor` | Demo pipeline laporan penipuan sampai approval/broadcast. |
+| `npm run demo:aduankonten` | Demo pipeline AduanKonten. |
+| `npm run e2e:broadcast` | E2E scrape -> strukturisasi -> broadcast console. |
+| `npm run e2e:lapor` | E2E fitur lapor penipuan. |
+| `npm run test:brain` | Test brain/tool calling Agent 2. |
+| `npm run test:checkurl` | Test deteksi/cek URL. |
+| `npm run test:vision` | Test pembacaan gambar via vision provider. |
+| `npm run check:laporgub` | Cek status Laporgub manual. |
+| `npm run check:aduankonten` | Cek status AduanKonten manual. |
+
+Untuk test yang harus terisolasi dari Supabase produksi, prefix command dengan `SUPABASE_DB_URL=` seperti contoh init di atas.
+
+Untuk sengaja mengaktifkan broadcast otomatis info bansos baru dari hasil scrape, set `NEW_INFO_BROADCAST_AUTO=true`. Jangan aktifkan ini untuk demo synthetic atau saat bot terhubung ke grup sungguhan kecuali memang ingin semua info baru langsung disebar.
 
 ## Agent 1 on-demand
 

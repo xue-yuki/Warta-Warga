@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, hasSupabase } from "../config.js";
+import { embed, cosine } from "../embeddings/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +33,9 @@ function sqliteDb() {
   ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
   ensureColumn(_sqlite, 'log_interaksi', 'ringkas_pesan', 'TEXT');
   ensureColumn(_sqlite, 'log_interaksi', 'ringkas_resp', 'TEXT');
+  ensureColumn(_sqlite, 'laporan', 'sumber_urls', 'TEXT');
+  ensureColumn(_sqlite, 'laporan', 'embedding', 'TEXT');
+  ensureColumn(_sqlite, 'laporan', 'cluster_reason', 'TEXT');
   return _sqlite;
 }
 
@@ -53,6 +57,21 @@ async function pgInit() {
   }
   try {
     await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
+  } catch (err) {
+    /* ignore if column exists or alter not supported */
+  }
+  try {
+    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS sumber_urls TEXT`;
+  } catch (err) {
+    /* ignore if column exists or alter not supported */
+  }
+  try {
+    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS embedding JSONB`;
+  } catch (err) {
+    /* ignore if column exists or alter not supported */
+  }
+  try {
+    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS cluster_reason TEXT`;
   } catch (err) {
     /* ignore if column exists or alter not supported */
   }
@@ -261,22 +280,47 @@ export async function markBroadcast({ fingerprint, program, wilayahTag, grupCoun
 
 // ---------- laporan ----------
 
-export async function insertLaporan({ isiRingkas, modusKey, wilayahTag, status, dasarVerifikasi, teksPeringatan }) {
+function encodeSourceUrls(sourceUrls) {
+  const urls = [...new Set((sourceUrls || []).map((u) => String(u || '').trim()).filter(Boolean))];
+  return urls.length ? JSON.stringify(urls) : null;
+}
+
+export function parseLaporanSourceUrls(rowOrValue) {
+  const raw = typeof rowOrValue === 'object' && rowOrValue ? rowOrValue.sumber_urls : rowOrValue;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return String(raw)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+}
+
+export function laporanHasSources(row) {
+  return parseLaporanSourceUrls(row).length > 0;
+}
+
+export async function insertLaporan({ isiRingkas, modusKey, wilayahTag, status, dasarVerifikasi, sourceUrls = [], teksPeringatan }) {
   await initDb();
   const now = new Date().toISOString();
+  const sumberUrls = encodeSourceUrls(sourceUrls);
+  const vec = await embed(isiRingkas).catch(() => null);
   if (hasSupabase()) {
     const [row] = await _pg`
-      INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, teks_peringatan, timestamp, updated_ts)
-      VALUES (${isiRingkas}, ${modusKey || null}, ${wilayahTag}, ${status}, ${dasarVerifikasi || null}, ${teksPeringatan || null}, ${now}, ${now})
+      INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, sumber_urls, teks_peringatan, timestamp, updated_ts, embedding)
+      VALUES (${isiRingkas}, ${modusKey || null}, ${wilayahTag}, ${status}, ${dasarVerifikasi || null}, ${sumberUrls}, ${teksPeringatan || null}, ${now}, ${now}, ${vec ? _pg.json(vec) : null})
       RETURNING id`;
     return row.id;
   }
   return sq()
     .prepare(
-      `INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, teks_peringatan, timestamp, updated_ts)
-       VALUES (@isi, @modus, @wilayah, @status, @dasar, @teks, @ts, @ts)`,
+      `INSERT INTO laporan (isi_ringkas, modus_key, wilayah_tag, status, dasar_verifikasi, sumber_urls, teks_peringatan, timestamp, updated_ts, embedding)
+       VALUES (@isi, @modus, @wilayah, @status, @dasar, @sumberUrls, @teks, @ts, @ts, @embedding)`,
     )
-    .run({ isi: isiRingkas, modus: modusKey || null, wilayah: wilayahTag, status, dasar: dasarVerifikasi || null, teks: teksPeringatan || null, ts: now }).lastInsertRowid;
+    .run({ isi: isiRingkas, modus: modusKey || null, wilayah: wilayahTag, status, dasar: dasarVerifikasi || null, sumberUrls, teks: teksPeringatan || null, ts: now, embedding: vec ? JSON.stringify(vec) : null }).lastInsertRowid;
 }
 
 export async function findClusterLaporan({ modusKey, wilayahTag, status }) {
@@ -292,13 +336,132 @@ export async function findClusterLaporan({ modusKey, wilayahTag, status }) {
   return sq().prepare(`SELECT * FROM laporan WHERE modus_key = ? AND wilayah_tag = ? AND status = ? AND status_approval = 'menunggu' ORDER BY id DESC LIMIT 1`).get(modusKey, wilayahTag, status) || null;
 }
 
-export async function bumpLaporanSerupa(id) {
+const STOPWORDS = new Set([
+  'ada',
+  'atau',
+  'dari',
+  'dan',
+  'di',
+  'dengan',
+  'ini',
+  'itu',
+  'jadi',
+  'kalau',
+  'karena',
+  'ke',
+  'laporan',
+  'modus',
+  'penipuan',
+  'peringatan',
+  'yang',
+]);
+
+function textTokens(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !STOPWORDS.has(w)),
+  );
+}
+
+function textSimilarity(a, b) {
+  const aa = textTokens(a);
+  const bb = textTokens(b);
+  if (!aa.size || !bb.size) return 0;
+  let inter = 0;
+  for (const t of aa) if (bb.has(t)) inter++;
+  const union = aa.size + bb.size - inter;
+  const jaccard = union ? inter / union : 0;
+  const containment = inter / Math.min(aa.size, bb.size);
+  return Math.max(jaccard, containment * 0.82);
+}
+
+const COSINE_THRESHOLD = 0.75;
+
+export async function findSimilarClusterLaporan({ modusKey, wilayahTag, status, isiRingkas, threshold = 0.58 }) {
+  await initDb();
+  const exact = modusKey && modusKey !== 'lainnya' ? await findClusterLaporan({ modusKey, wilayahTag, status }) : null;
+  if (exact) return { ...exact, cluster_score: 1, cluster_reason: 'modus_key' };
+  if (!isiRingkas || status === 'bukan_penipuan') return null;
+
+  const rows = hasSupabase()
+    ? [
+        ...(await _pg`
+          SELECT * FROM laporan
+          WHERE wilayah_tag = ${wilayahTag}
+            AND status = ${status}
+            AND status_approval = 'menunggu'
+          ORDER BY updated_ts DESC NULLS LAST, id DESC
+          LIMIT 75`),
+      ]
+    : sq()
+        .prepare(
+          `SELECT * FROM laporan
+           WHERE wilayah_tag = ? AND status = ? AND status_approval = 'menunggu'
+           ORDER BY updated_ts DESC, id DESC LIMIT 75`,
+        )
+        .all(wilayahTag, status);
+
+  const queryVec = await embed(isiRingkas).catch(() => null);
+
+  let best = null;
+  for (const row of rows) {
+    let score;
+    let reason;
+    const rowVec = row.embedding
+      ? (typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding)
+      : null;
+
+    if (queryVec && rowVec) {
+      score = cosine(queryVec, rowVec);
+      reason = 'cosine';
+      if (score < COSINE_THRESHOLD) continue;
+    } else {
+      score = textSimilarity(isiRingkas, row.isi_ringkas);
+      reason = 'similar_text';
+      if (score < threshold) continue;
+    }
+
+    if (!best || score > best.cluster_score) {
+      best = { ...row, cluster_score: score, cluster_reason: reason };
+    }
+  }
+  return best;
+}
+
+export async function bumpLaporanSerupa(id, evidence = {}) {
   await initDb();
   const now = new Date().toISOString();
+  const current = await getLaporan(id);
+  const mergedSourceUrls = encodeSourceUrls([...parseLaporanSourceUrls(current), ...(evidence.sourceUrls || [])]);
+  const dasarVerifikasi = evidence.dasarVerifikasi || current?.dasar_verifikasi || null;
+  const teksPeringatan = current?.teks_peringatan || evidence.teksPeringatan || null;
+  const clusterReason = evidence.clusterReason || current?.cluster_reason || null;
   if (hasSupabase()) {
-    await _pg`UPDATE laporan SET jumlah_serupa = jumlah_serupa + 1, updated_ts = ${now} WHERE id = ${id}`;
+    await _pg`
+      UPDATE laporan
+      SET jumlah_serupa = jumlah_serupa + 1,
+          dasar_verifikasi = ${dasarVerifikasi},
+          sumber_urls = ${mergedSourceUrls},
+          teks_peringatan = ${teksPeringatan},
+          cluster_reason = ${clusterReason},
+          updated_ts = ${now}
+      WHERE id = ${id}`;
   } else {
-    sq().prepare(`UPDATE laporan SET jumlah_serupa = jumlah_serupa + 1, updated_ts = ? WHERE id = ?`).run(now, id);
+    sq()
+      .prepare(
+        `UPDATE laporan
+         SET jumlah_serupa = jumlah_serupa + 1,
+             dasar_verifikasi = ?,
+             sumber_urls = ?,
+             teks_peringatan = ?,
+             cluster_reason = ?,
+             updated_ts = ?
+         WHERE id = ?`,
+      )
+      .run(dasarVerifikasi, mergedSourceUrls, teksPeringatan, clusterReason, now, id);
   }
   return getLaporan(id);
 }
@@ -341,6 +504,56 @@ export async function listAntrianApproval() {
   await initDb();
   if (hasSupabase()) return [...(await _pg`SELECT * FROM laporan WHERE status = 'jelas_penipuan' AND status_approval = 'menunggu' ORDER BY jumlah_serupa DESC, id DESC`)];
   return sq().prepare(`SELECT * FROM laporan WHERE status = 'jelas_penipuan' AND status_approval = 'menunggu' ORDER BY jumlah_serupa DESC, id DESC`).all();
+}
+
+export async function listLaporanSiapBroadcast() {
+  await initDb();
+  if (hasSupabase()) {
+    return [
+      ...(await _pg`
+        SELECT * FROM laporan
+        WHERE status = 'jelas_penipuan'
+          AND status_approval = 'menunggu'
+          AND sumber_urls IS NOT NULL
+          AND sumber_urls <> ''
+          AND sumber_urls <> '[]'
+        ORDER BY jumlah_serupa DESC, id DESC`),
+    ];
+  }
+  return sq()
+    .prepare(
+      `SELECT * FROM laporan
+       WHERE status = 'jelas_penipuan'
+         AND status_approval = 'menunggu'
+         AND sumber_urls IS NOT NULL
+         AND sumber_urls <> ''
+         AND sumber_urls <> '[]'
+       ORDER BY jumlah_serupa DESC, id DESC`,
+    )
+    .all();
+}
+
+export async function listLaporanPerluVerifikasi() {
+  await initDb();
+  if (hasSupabase()) {
+    return [
+      ...(await _pg`
+        SELECT * FROM laporan
+        WHERE status IN ('jelas_penipuan','belum_pasti')
+          AND status_approval = 'menunggu'
+          AND (sumber_urls IS NULL OR sumber_urls = '' OR sumber_urls = '[]')
+        ORDER BY jumlah_serupa DESC, id DESC`),
+    ];
+  }
+  return sq()
+    .prepare(
+      `SELECT * FROM laporan
+       WHERE status IN ('jelas_penipuan','belum_pasti')
+         AND status_approval = 'menunggu'
+         AND (sumber_urls IS NULL OR sumber_urls = '' OR sumber_urls = '[]')
+       ORDER BY jumlah_serupa DESC, id DESC`,
+    )
+    .all();
 }
 
 export async function listPrioritasBelumPasti(minSerupa = 3) {
@@ -498,6 +711,29 @@ export async function insertLaporanLayananSubmitLog({ laporanId, portal, attempt
      VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(laporanId, portal, attempt, status, errorMsg || null, now);
+}
+
+export async function listLaporanApprovedPendingBroadcast() {
+  await initDb();
+  if (hasSupabase()) {
+    return [
+      ...(await _pg`
+        SELECT l.* FROM laporan l
+        LEFT JOIN peringatan_terkirim pt ON pt.laporan_id = l.id
+        WHERE l.status_approval = 'disetujui'
+          AND pt.laporan_id IS NULL
+        ORDER BY l.id DESC`),
+    ];
+  }
+  return sq()
+    .prepare(
+      `SELECT l.* FROM laporan l
+       LEFT JOIN peringatan_terkirim pt ON pt.laporan_id = l.id
+       WHERE l.status_approval = 'disetujui'
+         AND pt.laporan_id IS NULL
+       ORDER BY l.id DESC`,
+    )
+    .all();
 }
 
 // ---------- peringatan_terkirim ----------

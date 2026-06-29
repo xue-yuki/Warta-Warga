@@ -7,8 +7,9 @@ import {
   wasPeringatanSent,
   markPeringatanTerkirim,
   updateInfoBansosImage,
+  listLaporanApprovedPendingBroadcast,
 } from '../db/index.js';
-import { generateAndSavePoster } from '../llm/imageGen.js';
+import { generateAndSavePoster, generatePeringatanPoster } from '../llm/imageGen.js';
 import { groupScopeTags, infoMatchesScope, humanWilayah } from '../util/wilayah.js';
 import { formatTanggalID, isExpiredDate, masaBerlakuNotice } from '../util/tanggal.js';
 
@@ -20,6 +21,7 @@ import { formatTanggalID, isExpiredDate, masaBerlakuNotice } from '../util/tangg
 // Bila null (mis. `npm run scrape` standalone / bot belum connect) → broadcast dilewati
 // dan TIDAK ditandai terkirim, sehingga putaran berikutnya (saat bot hidup) tetap mengabarkan.
 let _sender = null;
+const _peringatanInFlight = new Set();
 export function setBroadcaster(fn) {
   _sender = typeof fn === 'function' ? fn : null;
 }
@@ -261,21 +263,66 @@ export async function broadcastTrenNasional(items, opts = {}) {
   return { sent: okGrup };
 }
 
-export async function broadcastPeringatan(laporan) {
-  if (!_sender) return { sent: 0, grupCount: 0, reason: 'no-sender' }; // bot offline → tunda diam-diam
+/**
+ * Poll Supabase tiap interval: broadcast laporan yang sudah di-approve web dashboard
+ * tapi belum pernah dikirim. Generate poster dulu, lalu kirim ke grup wilayah.
+ */
+export async function broadcastPendingPeringatan() {
+  if (!_sender) return { sent: 0, infos: 0 };
+  const pending = await listLaporanApprovedPendingBroadcast().catch(() => []);
+  if (pending.length === 0) return { sent: 0, infos: 0 };
+
+  console.log(`[PendingBroadcast] ${pending.length} laporan approved menunggu broadcast...`);
+  let sent = 0;
+  let infos = 0;
+
+  for (const l of pending) {
+    let imagePath = null;
+    try {
+      imagePath = await generatePeringatanPoster({
+        kategori: l.status === 'jelas_penipuan' ? 'Penipuan' : 'Misinformasi',
+        wilayah: humanWilayah(l.wilayah_tag),
+        total: l.jumlah_serupa || 1,
+        deskripsi: l.isi_ringkas,
+        imageId: `peringatan_${l.wilayah_tag}_${l.id}`.replace(/[^a-z0-9_]/gi, '_'),
+      });
+    } catch (e) {
+      console.warn(`[PendingBroadcast] poster gagal #${l.id}: ${e.message}`);
+    }
+    const r = await broadcastPeringatan(l, { imagePath }).catch((e) => ({ sent: 0, grupCount: 0, reason: e.message }));
+    sent += r.sent || 0;
+    if ((r.sent || 0) > 0) infos++;
+  }
+
+  if (sent > 0) console.log(`[PendingBroadcast] ✅ ${infos} peringatan → ${sent} grup.`);
+  return { sent, infos };
+}
+
+export async function broadcastPeringatan(laporan, { imagePath = null } = {}) {
+  if (!_sender) return { sent: 0, grupCount: 0, reason: 'no-sender' };
   if (!laporan || laporan.status_approval !== 'disetujui') {
-    return { sent: 0, grupCount: 0, reason: 'belum-disetujui' }; // Lapis 2: wajib approval manusia
+    return { sent: 0, grupCount: 0, reason: 'belum-disetujui' };
   }
-  if (await wasPeringatanSent(laporan.id)) return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
-
-  const targets = await grupsForWilayah(laporan.wilayah_tag);
-  if (targets.length === 0) return { sent: 0, grupCount: 0, reason: 'tak-ada-grup' };
-
-  const text = formatPeringatan(laporan);
-  const okGrup = await sendToGrups(targets, text);
-  if (okGrup > 0) {
-    await markPeringatanTerkirim({ laporanId: laporan.id, wilayahTag: laporan.wilayah_tag, grupCount: okGrup });
-    console.log(`[Peringatan] ⚠️ laporan #${laporan.id} (${laporan.wilayah_tag}) → ${okGrup} grup.`);
+  const key = String(laporan.id || '');
+  if (key && _peringatanInFlight.has(key)) {
+    return { sent: 0, grupCount: 0, reason: 'sedang-dikirim' };
   }
-  return { sent: okGrup, grupCount: okGrup };
+  if (key) _peringatanInFlight.add(key);
+  try {
+    if (await wasPeringatanSent(laporan.id)) return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
+
+    const targets = await grupsForWilayah(laporan.wilayah_tag);
+    if (targets.length === 0) return { sent: 0, grupCount: 0, reason: 'tak-ada-grup' };
+
+    const text = formatPeringatan(laporan);
+    const resolvedImage = imagePath && fs.existsSync(imagePath) ? imagePath : null;
+    const okGrup = await sendToGrups(targets, text, resolvedImage);
+    if (okGrup > 0) {
+      await markPeringatanTerkirim({ laporanId: laporan.id, wilayahTag: laporan.wilayah_tag, grupCount: okGrup });
+      console.log(`[Peringatan] ⚠️ laporan #${laporan.id} (${laporan.wilayah_tag}) → ${okGrup} grup${resolvedImage ? ' + poster' : ''}.`);
+    }
+    return { sent: okGrup, grupCount: okGrup };
+  } finally {
+    if (key) _peringatanInFlight.delete(key);
+  }
 }

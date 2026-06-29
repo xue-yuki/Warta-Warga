@@ -64,9 +64,12 @@ CREATE TABLE IF NOT EXISTS laporan (
   jumlah_serupa    INTEGER NOT NULL DEFAULT 1, -- counter laporan sejenis sewilayah
   status_approval  TEXT NOT NULL DEFAULT 'menunggu', -- menunggu | disetujui | ditolak
   dasar_verifikasi TEXT,                       -- ringkas hasil cek AI (opsional)
+  sumber_urls      TEXT,                       -- JSON array URL sumber resmi yang mendukung/menyanggah
   teks_peringatan  TEXT,                       -- teks siap-sebar (boleh diedit pengurus sebelum approve)
   timestamp        TEXT NOT NULL,
-  updated_ts       TEXT
+  updated_ts       TEXT,
+  embedding        TEXT,                        -- JSON float[] (L2-normalized) untuk cosine clustering
+  cluster_reason   TEXT                         -- 'modus_key' | 'cosine' | 'similar_text' | NULL (baris baru)
 );
 
 -- Jejak peringatan yang sudah disebar (dedup, konsisten dengan pola broadcast_log).

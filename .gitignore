@@ -8,6 +8,8 @@ debug/
 aduankontenid.txt
 main_captcha_solver_rotate.js
 .agents
+# data/posters/*
+data/*
 # Baileys auth state (berisi kredensial sesi WA — JANGAN commit)
 auth_state/
 auth_info*/

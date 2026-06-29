@@ -81,6 +81,48 @@ function userPart(jid) {
     .split(":")[0];
 }
 
+function isStartCommand(text) {
+  return /^\/start\b/i.test(String(text || "").trim());
+}
+
+function isRegisteredTarget(row) {
+  return Boolean(row && Number(row.status_start) === 1);
+}
+
+export function startUsage(isGroup) {
+  const target = isGroup ? "grup ini" : "nomor ini";
+  return (
+    `Untuk mengaktifkan ${target}, kirim:\n` +
+    "`/start <daerah>`\n\n" +
+    "Contoh:\n" +
+    "`/start Kab. Banyumas`\n" +
+    "`/start Kota Semarang`\n\n" +
+    "Setelah aktif, Bapak/Ibu bisa pilih menu 1, 2, atau 3."
+  );
+}
+
+async function registerTarget({ jid, text, send, isGroup }) {
+  const arg = String(text || "").replace(/^\/start\b/i, "").trim();
+  if (!arg) {
+    await send(startUsage(isGroup));
+    return false;
+  }
+
+  const wilayahTag = normalizeWilayahTag(arg);
+  const provinsiTag = inferProvinsiTag(wilayahTag);
+  await upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
+
+  const target = isGroup ? "Grup" : "Nomor";
+  await send(
+    `✅ ${target} terdaftar untuk wilayah *${arg}* ` +
+      `(tag: ${wilayahTag}${provinsiTag ? `, ${provinsiTag}` : ""}).\n\n` +
+      (isGroup
+        ? "Mention saya (@) untuk tanya info atau cek kabar bansos."
+        : GREETING),
+  );
+  return true;
+}
+
 /**
  * Deteksi mention bot. Tahan terhadap:
  * - device suffix (:12), domain beda (@s.whatsapp.net vs @lid)
@@ -232,6 +274,38 @@ async function handleOne(sock, msg, botJid) {
   const send = (body) => sock.sendMessage(jid, { text: body }, isGroup ? { quoted: msg } : undefined);
   let text = extractText(msg);
 
+  // Enforce registration before any expensive AI work. This keeps private numbers and
+  // mentioned groups on the /start path even when they send images or free text first.
+  if (!isStartCommand(text)) {
+    if (isGroup) {
+      if (isMentioned(msg, sock)) {
+        const grup = await getGrup(jid);
+        if (!isRegisteredTarget(grup)) {
+          await markRead(sock, msg);
+          await presence(sock, jid, "composing");
+          try {
+            await send(startUsage(true));
+          } finally {
+            await presence(sock, jid, "paused");
+          }
+          return;
+        }
+      }
+    } else {
+      const registered = await getGrup(jid);
+      if (!isRegisteredTarget(registered)) {
+        await markRead(sock, msg);
+        await presence(sock, jid, "composing");
+        try {
+          await send(startUsage(false));
+        } finally {
+          await presence(sock, jid, "paused");
+        }
+        return;
+      }
+    }
+  }
+
   // Gambar (poster/screenshot/struk penipuan): baca jadi teks via vision lalu gabung dgn caption.
   // Mahal → hanya saat bot memang akan merespons (japri, atau di grup ketika di-mention).
   const img = unwrap(msg.message)?.imageMessage;
@@ -239,7 +313,7 @@ async function handleOne(sock, msg, botJid) {
   let imageBuffer = null;
   let imageMimetype = null;
   if (img) {
-    const willRespond = isGroup ? isMentioned(msg, sock) : true;
+    const willRespond = !isStartCommand(text) && (isGroup ? isMentioned(msg, sock) : true);
     if (willRespond) {
       await presence(sock, jid, "composing");
       const desc = await imageToText(sock, msg, img).catch((e) => {
@@ -276,19 +350,11 @@ async function imageToText(sock, msg, img) {
 
 async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null, imageBuffer = null, imageMimetype = null, messageId = null) {
   // /start → daftarkan grup + set wilayah.
-  if (/^\/start\b/i.test(text)) {
+  if (isStartCommand(text)) {
     await markRead(sock, msg);
     await presence(sock, jid, "composing");
     try {
-      const arg = text.replace(/^\/start\b/i, "").trim();
-      if (!arg) {
-        await send("Untuk mengaktifkan grup ini, kirim:\n`/start <daerah>`\nContoh: `/start Kab. Banyumas` atau `/start kabupaten:banyumas`");
-        return;
-      }
-      const wilayahTag = normalizeWilayahTag(arg);
-      const provinsiTag = inferProvinsiTag(wilayahTag);
-      await upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
-      await send(`✅ Grup terdaftar untuk wilayah *${arg}* (tag: ${wilayahTag}${provinsiTag ? `, ${provinsiTag}` : ""}).\n` + `Mention saya (@) untuk tanya info atau cek kabar bansos. Saya hanya merespons saat di-mention di grup.`);
+      await registerTarget({ jid, text, send, isGroup: true });
     } finally {
       await presence(sock, jid, "paused");
     }
@@ -308,7 +374,11 @@ async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null,
   try {
     const cleanText = text.replace(/@\d+/g, "").trim();
     const grup = await getGrup(jid);
-    const scopeTags = grup ? groupScopeTags(grup) : [config.defaultWilayahTag];
+    if (!isRegisteredTarget(grup)) {
+      await send(startUsage(true));
+      return;
+    }
+    const scopeTags = groupScopeTags(grup);
     // Riwayat chat per-ORANG di dalam grup (bukan per-grup) → konteks follow-up tak kecampur antar warga.
     const sender = userPart(msg.key.participant || msg.participant || jid);
     await handleContent(sock, jid, {
@@ -354,7 +424,7 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
 
   const result = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });
 
-  if (result.aksi === "info" && uncovered && hasSearch() && !recentlyAttempted(target)) {
+  if (result.aksi === "info" && uncovered && config.onDemandDiscovery.enabled && hasSearch() && !recentlyAttempted(target)) {
     if (regionJobs.has(target)) {
       await send(`Sabar ya kak 🙏 info buat *${humanWilayah(target)}* lagi aku cariin, sebentar lagi aku kabarin.`);
     } else {
@@ -412,6 +482,18 @@ async function handleJapri(sock, jid, msg, text, send, imageText = null, imageBu
   await presence(sock, jid, "composing"); // 'mengetik...'
 
   try {
+    if (isStartCommand(text)) {
+      const registered = await registerTarget({ jid, text, send, isGroup: false });
+      if (registered) greeted.add(jid);
+      return;
+    }
+
+    const registered = await getGrup(jid);
+    if (!isRegisteredTarget(registered)) {
+      await send(startUsage(false));
+      return;
+    }
+
     // F2.6: pesan pertama di japri → sapaan pembuka (sekali per sesi proses).
     let justGreeted = false;
     if (!greeted.has(jid)) {
@@ -424,8 +506,8 @@ async function handleJapri(sock, jid, msg, text, send, imageText = null, imageBu
     await handleContent(sock, jid, {
       text,
       konteks: "japri",
-      scopeTags: null,
-      wilayahTag: null,
+      scopeTags: groupScopeTags(registered),
+      wilayahTag: registered.wilayah_tag,
       justGreeted,
       send,
       sessionId: jid,

@@ -6,7 +6,7 @@ import { chatJson } from '../llm/openrouter.js';
 import { hasLLM } from '../config.js';
 import { checkClaim } from './claim.js';
 import { detectWilayahFromText, normalizeWilayahTag, humanWilayah, isKabKota } from '../util/wilayah.js';
-import { insertLaporan, findClusterLaporan, bumpLaporanSerupa } from '../db/index.js';
+import { insertLaporan, findSimilarClusterLaporan, bumpLaporanSerupa } from '../db/index.js';
 import { notifyPengurusUrgent, URGENT_THRESHOLD } from '../agent1/broadcast.js';
 
 // Pola modus penipuan UMUM (bukan cuma bansos) → eskalasi ke "jelas_penipuan" walau tak
@@ -141,6 +141,52 @@ const ACK =
   'atau *ngaku petugas/bank/CS* — itu tanda penipuan. Jangan dituruti dulu, dan jangan kasih kode apa pun.\n\n' +
   '_(Kalau terbukti, peringatan akan disebar ke grup daerahmu setelah ditinjau pengurus — tanpa menyebut identitasmu.)_';
 
+function formatLaporanReply({ status, ringkas, wilayahTag }) {
+  const danger = status === 'jelas_penipuan';
+  const safe = status === 'bukan_penipuan';
+  const conclusion = danger
+    ? '🚨 INI PENIPUAN. Jangan dilanjutkan.'
+    : safe
+      ? '✅ Ini belum terlihat sebagai penipuan dari sumber resmi.'
+      : '⚠️ HATI-HATI. Ini belum bisa dipastikan aman.';
+  const modus = scrubPII(ringkas?.isi_ringkas) || 'Ada modus mencurigakan yang dilaporkan warga.';
+  const warning = scrubPII(ringkas?.teks_peringatan) || FALLBACK_PERINGATAN;
+  const wilayah = wilayahTag ? ` untuk wilayah *${humanWilayah(wilayahTag)}*` : '';
+
+  if (safe) {
+    return `${conclusion}
+
+Yang perlu diketahui:
+• ${modus}
+• Tetap cek lewat kanal resmi atau tanya RT/kelurahan sebelum mengikuti arahan apa pun.
+
+🔢 Yang aman Bapak/Ibu lakukan:
+1. Cek status bantuan lewat cekbansos.kemensos.go.id atau petugas setempat.
+2. Jangan bayar biaya apa pun.
+3. Jangan kirim OTP, PIN, password, NIK, atau data pribadi ke orang yang menghubungi duluan.
+
+💡 Ingat: ${warning}
+
+✅ Laporan Bapak/Ibu sudah saya catat${wilayah}. Nanti ditinjau pengurus dulu sebelum peringatan disebar ke warga lain.`;
+  }
+
+  return `${conclusion}
+
+${danger ? 'Kenapa bahaya:' : 'Kenapa perlu hati-hati:'}
+• ${modus}
+• Modus seperti ini bisa dipakai untuk mencuri uang, data pribadi, atau isi HP Bapak/Ibu.
+
+🔢 Yang harus Bapak/Ibu lakukan SEKARANG:
+1. Jangan klik link, file APK, atau tombol apa pun dari pesan itu.
+2. Jangan kirim OTP, PIN, password, NIK, atau uang.
+3. Blokir pengirimnya.
+4. Kalau sudah terlanjur klik/install/kirim data, 📞 hubungi keluarga sekarang dan segera telepon bank.
+
+💡 Ingat: ${warning}
+
+✅ Laporan Bapak/Ibu sudah saya catat${wilayah}. Nanti ditinjau pengurus dulu sebelum peringatan disebar ke warga lain.`;
+}
+
 /**
  * Proses sebuah laporan yang wilayahnya SUDAH diketahui.
  * Verifikasi → status → ringkas → simpan/cluster. TIDAK broadcast (nunggu approval).
@@ -151,27 +197,42 @@ export async function prosesLaporan({ text, wilayahTag, scopeTags = null }) {
   const label = verify?.label || 'unverified';
   const scamKey = matchScamPattern(text);
   const status = labelToStatus(label, scamKey);
+  const sourceUrls = verify?.sources || [];
 
   const ringkas = await summarizeLaporan(text, scamKey);
   // Dasar tinjauan: kalau ada hasil cek sumber pakai itu. Untuk laporan yang TIDAK cocok pola
   // & tak ada di sumber (status belum_pasti, sering = modus baru), pakai PENILAIAN LLM sebagai
   // dasar — jangan ditolak, biar tetap masuk antrian tinjau & ikut clustering kalau makin rame.
   let dasar = verify?.alasan || null;
+  if (scamKey && label === 'unverified') {
+    dasar = `Cocok pola ${humanModus(scamKey)}. Belum ada sumber resmi yang mengonfirmasi klaim ini, jadi perlu tinjauan pengurus sebelum disebar.`;
+  }
   if (status === 'belum_pasti' && !scamKey) {
     dasar =
       ringkas.penilaian ||
       'Belum ada di sumber resmi & belum cocok pola yang dikenal — kemungkinan modus baru, perlu ditinjau pengurus.';
   }
 
-  // Clustering (L5): laporan sejenis (modus + wilayah + status SAMA) → tambah counter, bukan baris
-  // baru. Hanya untuk modus SPESIFIK — modus generik ("lainnya") jangan digabung biar tak salah merge.
-  const dapatCluster = ringkas.modus_key && ringkas.modus_key !== 'lainnya';
-  const existing = dapatCluster ? await findClusterLaporan({ modusKey: ringkas.modus_key, wilayahTag, status }) : null;
+  // Clustering (L5): laporan sejenis (modus + wilayah + status sama) → tambah counter,
+  // bukan baris baru. Exact modus_key dicoba dulu, lalu fallback kemiripan ringkasan agar
+  // hoaks/penipuan yang sama tapi diringkas agak beda tetap masuk satu grup.
+  const existing = await findSimilarClusterLaporan({
+    modusKey: ringkas.modus_key,
+    wilayahTag,
+    status,
+    isiRingkas: ringkas.isi_ringkas,
+  });
   let laporan;
   let clustered = false;
   if (existing) {
-    laporan = await bumpLaporanSerupa(existing.id);
+    laporan = await bumpLaporanSerupa(existing.id, {
+      sourceUrls,
+      dasarVerifikasi: dasar,
+      teksPeringatan: ringkas.teks_peringatan,
+      clusterReason: existing.cluster_reason,
+    });
     clustered = true;
+    if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => { });
   } else {
     const id = await insertLaporan({
       isiRingkas: ringkas.isi_ringkas,
@@ -179,11 +240,12 @@ export async function prosesLaporan({ text, wilayahTag, scopeTags = null }) {
       wilayahTag,
       status,
       dasarVerifikasi: dasar,
+      sourceUrls,
       teksPeringatan: ringkas.teks_peringatan,
     });
     laporan = { id, status, wilayah_tag: wilayahTag, modus_key: ringkas.modus_key, isi_ringkas: ringkas.isi_ringkas };
   }
-  return { reply: ACK, laporan, status, clustered };
+  return { reply: formatLaporanReply({ status, ringkas, wilayahTag }) || ACK, laporan, status, clustered };
 }
 
 /**
@@ -209,12 +271,13 @@ export async function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, ting
   const teksPeringatan = scrubPII(String(teks_peringatan || '').trim()) || FALLBACK_PERINGATAN;
   const modusKey = matchScamPattern(isiRingkas) || 'lainnya';
 
-  // Cluster hanya untuk modus SPESIFIK (modus + wilayah + status sama) — 'lainnya' jangan digabung.
-  const existing = modusKey !== 'lainnya' ? await findClusterLaporan({ modusKey, wilayahTag, status }) : null;
+  // Cluster by exact modus first, then similar text. Tool reports do not carry source URLs,
+  // so they stay in the "perlu verifikasi" dashboard section until reviewed.
+  const existing = await findSimilarClusterLaporan({ modusKey, wilayahTag, status, isiRingkas });
   let laporan;
   let clustered = false;
   if (existing) {
-    laporan = await bumpLaporanSerupa(existing.id);
+    laporan = await bumpLaporanSerupa(existing.id, { clusterReason: existing.cluster_reason });
     clustered = true;
     // Fast-track: pas nyentuh ambang (sekali), ping pengurus untuk segera tinjau. Bukan auto-sebar.
     if (laporan.jumlah_serupa === URGENT_THRESHOLD) notifyPengurusUrgent(laporan).catch(() => { });

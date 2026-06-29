@@ -78,8 +78,8 @@ async function main() {
   // laporan
   let nLaporan = 0;
   for (const l of rows('laporan')) {
-    await sql`INSERT INTO laporan (id, isi_ringkas, modus_key, wilayah_tag, status, jumlah_serupa, status_approval, dasar_verifikasi, teks_peringatan, timestamp, updated_ts)
-      VALUES (${l.id}, ${l.isi_ringkas}, ${l.modus_key}, ${l.wilayah_tag}, ${l.status}, ${l.jumlah_serupa}, ${l.status_approval}, ${l.dasar_verifikasi}, ${l.teks_peringatan}, ${l.timestamp}, ${l.updated_ts || null})`;
+    await sql`INSERT INTO laporan (id, isi_ringkas, modus_key, wilayah_tag, status, jumlah_serupa, status_approval, dasar_verifikasi, sumber_urls, teks_peringatan, timestamp, updated_ts)
+      VALUES (${l.id}, ${l.isi_ringkas}, ${l.modus_key}, ${l.wilayah_tag}, ${l.status}, ${l.jumlah_serupa}, ${l.status_approval}, ${l.dasar_verifikasi}, ${l.sumber_urls || null}, ${l.teks_peringatan}, ${l.timestamp}, ${l.updated_ts || null})`;
     nLaporan++;
   }
   await sql`SELECT setval(pg_get_serial_sequence('laporan','id'), GREATEST((SELECT COALESCE(MAX(id),1) FROM laporan), 1))`;

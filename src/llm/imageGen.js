@@ -47,6 +47,57 @@ function safeAssetId(record, explicitImageId) {
  * @param {object} record info record containing program, ringkasan, etc.
  * @returns {Promise<string|null>} absolute path to the saved image file, or null if failed.
  */
+/**
+ * Generate a warning poster for a cluster of penipuan/misinformasi reports.
+ * @param {{ kategori:string, wilayah:string, total:number, deskripsi:string, imageId?:string }} opts
+ * @returns {Promise<string|null>} absolute path to saved image, or null if failed.
+ */
+export async function generatePeringatanPoster({ kategori, wilayah, total, deskripsi, imageId } = {}) {
+  const apiKey = config.images.apiKey;
+  const baseUrl = config.images.baseUrl;
+  const model = config.images.model;
+  const assetId = safeAssetId({}, imageId || `peringatan_${Date.now()}`);
+
+  if (!apiKey) {
+    console.log('[ImageGen] ⚠️ API key not set — skipping peringatan poster.');
+    return null;
+  }
+
+  const prompt = `Create a bold, clear WARNING poster in Indonesian for community safety awareness.
+Warning type: ${kategori} (fraud / misinformation alert)
+Region: ${wilayah}
+Reports received: ${total} warga melaporkan kasus serupa
+Summary: ${deskripsi}
+
+Visual style:
+- Prominent red/orange warning palette with strong contrast
+- Large bold "⚠️ PERINGATAN" heading at top
+- Indonesian language throughout
+- Clean modern infographic layout
+- Include icons: shield, warning triangle, community
+- Safety tips section: "Jangan transfer uang / kasih OTP / klik link mencurigakan"
+- Footer: "Terverifikasi Admin Warta Warga"
+- Professional, urgent, trustworthy — suitable for WhatsApp broadcast`;
+
+  console.log(`[ImageGen] Generating peringatan poster for ${kategori} di ${wilayah} (${total} laporan)...`);
+  try {
+    const openai = new OpenAI({ apiKey, baseURL: baseUrl });
+    const result = await openai.images.generate({ model, prompt });
+    const b64 = result.data?.[0]?.b64_json;
+    if (!b64) { console.warn('[ImageGen] ❌ No b64_json returned.'); return null; }
+
+    const dirPath = path.join(ROOT, 'data', 'posters');
+    fs.mkdirSync(dirPath, { recursive: true });
+    const filePath = path.join(dirPath, `${assetId}.png`);
+    fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+    console.log(`[ImageGen] ✅ Saved peringatan poster: ${filePath}`);
+    return filePath;
+  } catch (err) {
+    console.error(`[ImageGen] ❌ Peringatan poster failed: ${err.message}`);
+    return null;
+  }
+}
+
 export async function generateAndSavePoster(record, { imageId } = {}) {
   const apiKey = config.images.apiKey;
   const baseUrl = config.images.baseUrl;
