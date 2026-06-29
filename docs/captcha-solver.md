@@ -33,29 +33,36 @@ Kode terkait:
 
 ## AduanKonten Cloudflare Challenge Handler
 
-Flow AduanKonten memiliki handler best-effort untuk mode headless.
+Flow AduanKonten memakai SeleniumBase UC mode dari Python. Handler ini menjadi satu jalur browser untuk portal AduanKonten.
 
 Konfigurasi:
 
 ```env
-CLOUDFLARE_CAPTCHA_SOLVER=true
-CLOUDFLARE_CAPTCHA_PROVIDER=openrouter
-CLOUDFLARE_OPENROUTER_API_KEY=
-CLOUDFLARE_OPENROUTER_MODEL=google/gemini-flash-1.5
-CLOUDFLARE_CAPTCHA_MAX_RETRIES=3
-CLOUDFLARE_CAPTCHA_TIMEOUT_MS=60000
+ADUANKONTEN_PYTHON=python
+ADUANKONTEN_SELENIUMBASE_SCRIPT=./scripts/aduankonten_seleniumbase.py
+ADUANKONTEN_USER_DATA_DIR=./.aduankonten_profile
 ```
 
-Provider Cloudflare AduanKonten memakai OpenRouter.
+Install dependency Python:
+
+```bash
+npm run setup:aduankonten
+```
+
+Validasi cepat:
+
+```bash
+python -c "import seleniumbase; print(seleniumbase.__version__)"
+npm run warmup:aduankonten -- --headless --debug --wait-ms=300000
+```
 
 Kode terkait:
 
-- `src/agent2/cloudflare-captcha-solver.js`
 - `src/portal/aduankonten.js`
+- `scripts/aduankonten_seleniumbase.py`
 
 ## Catatan Operasional
 
-- AduanKonten tetap dapat memberi challenge berulang pada mode headless walaupun cookie `cf_clearance` sudah ada.
-- Jika challenge berulang, gunakan warmup atau submit dengan `--headed`.
-- `ghost-cursor` dipakai untuk interaksi mouse/form, bukan untuk menggantikan session browser yang valid.
+- AduanKonten tetap dapat memberi challenge berulang pada mode headless walaupun profile browser sudah ada.
+- Jika challenge berulang, gunakan warmup headed untuk debugging manual.
 - Simpan session AduanKonten melalui `.aduankonten_profile/` dan `.aduankonten_session.json`.

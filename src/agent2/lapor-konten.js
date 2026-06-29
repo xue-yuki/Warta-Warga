@@ -532,7 +532,7 @@ async function submitPendingLaporKonten({ url, categoryKey, reason, imageBuffer,
       categoryId: category.id,
       reason,
       attachmentPath: lampiranPath,
-      headless: false,
+      headless: true,
     });
     if (result.duplicate) {
       await updateLaporanLayananStatus(id, "duplicate", {

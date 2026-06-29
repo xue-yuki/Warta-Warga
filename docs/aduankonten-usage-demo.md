@@ -4,13 +4,16 @@ Dokumen ini berisi cara menjalankan dry-run, warmup, probe, live submit, dan che
 
 ## Prasyarat
 
-Install dependency:
+Install dependency Node dan Python:
 
 ```bash
 npm install
+npm run setup:aduankonten
 ```
 
-Pastikan Chromium/Chrome tersedia. Jalur AduanKonten memakai Patchright dan `ghost-cursor`.
+`npm run setup:aduankonten` menjalankan `python -m pip install -r requirements.txt`.
+
+Pastikan Chrome/Chromium tersedia. Jalur AduanKonten memakai SeleniumBase UC mode dari Python.
 
 Konfigurasi minimal:
 
@@ -19,24 +22,22 @@ ADUANKONTEN_BASE_URL=https://aduankonten.id
 ADUANKONTEN_SESSION_PATH=./.aduankonten_session.json
 ADUANKONTEN_USER_DATA_DIR=./.aduankonten_profile
 ADUANKONTEN_DEBUG_DIR=
-ADUANKONTEN_BROWSER_CHANNEL=
+ADUANKONTEN_PYTHON=python
+ADUANKONTEN_SELENIUMBASE_SCRIPT=./scripts/aduankonten_seleniumbase.py
 ADUANKONTEN_CHECK_INTERVAL_HOURS=6
 ```
 
-Jika browser tidak ditemukan:
+Jika Python berbeda, isi `ADUANKONTEN_PYTHON=py -3` atau path Python yang punya package SeleniumBase.
 
-```env
-ADUANKONTEN_BROWSER_CHANNEL=chrome
+Checklist setelah setup:
+
+```bash
+python -c "import seleniumbase; print(seleniumbase.__version__)"
+npm run warmup:aduankonten -- --headless --debug --wait-ms=300000
+npm run demo:aduankonten -- --probe --url=https://example.com --category=perjudian --debug --challenge-wait-ms=300000
 ```
 
-Opsional untuk headless challenge handler:
-
-```env
-CLOUDFLARE_CAPTCHA_SOLVER=true
-CLOUDFLARE_CAPTCHA_PROVIDER=openrouter
-CLOUDFLARE_OPENROUTER_API_KEY=
-CLOUDFLARE_OPENROUTER_MODEL=google/gemini-flash-1.5
-```
+Bot WhatsApp memakai `headless: true` untuk submit dan follow-up status AduanKonten. Flag `--headed` hanya untuk debugging manual dari script CLI.
 
 ## Dry Run WhatsApp Flow
 
@@ -54,7 +55,7 @@ npm run demo:aduankonten -- --url=https://example.test --text="tolong laporkan s
 
 ## Warmup Session
 
-Warmup membuat atau menyegarkan session browser.
+Warmup membuat atau menyegarkan profile SeleniumBase/Chrome.
 
 Headless:
 
@@ -68,7 +69,7 @@ Headed:
 npm run warmup:aduankonten -- --debug --wait-ms=300000
 ```
 
-Gunakan headed jika headless terus mendapat Cloudflare challenge berulang.
+Bot WhatsApp memakai headless. Gunakan headed hanya untuk debugging manual jika Cloudflare tetap re-challenge.
 
 Hasil warmup sukses akan menyimpan:
 
@@ -127,23 +128,13 @@ Jika `--attachment` tidak diberikan, script memakai screenshot preview/page seba
 
 ## Validasi Sukses
 
-Submit sukses jika:
+Submit sukses jika halaman akhir menuju:
 
 ```text
-POST /submission/submit
-HTTP 302
-Location: https://aduankonten.id/page/success
+https://aduankonten.id/page/success
 ```
 
 Lalu halaman sukses memuat kode laporan di `#kodeLaporan`.
-
-Log debug normal:
-
-```text
-[aduankonten] mengklik submit
-[aduankonten] response submit: HTTP 302 -> https://aduankonten.id/page/success
-[aduankonten] menunggu halaman sukses
-```
 
 Output submit sukses:
 
@@ -186,7 +177,7 @@ Master switch:
 AGENT2_LAYANAN_CHECKERS_ENABLED=true
 ```
 
-Secara default, AduanKonten tidak langsung dicek saat `npm start` agar browser headed tidak terbuka ketika bot baru connect. Cek pertama berjalan pada interval berikutnya.
+Secara default, AduanKonten tidak langsung dicek saat `npm start` agar bot baru connect tidak langsung memicu status check/Cloudflare. Cek pertama berjalan pada interval berikutnya.
 
 ```env
 ADUANKONTEN_CHECK_ON_BOOT=false
@@ -208,8 +199,7 @@ ADUANKONTEN_CHECK_INTERVAL_HOURS=0
 ## Troubleshooting
 
 - Jika muncul challenge berulang di headless, jalankan headed.
-- Jika `POST /livewire/update` mendapat `HTTP 403 Just a moment`, session masih ditahan Cloudflare.
-- Jika field alasan terseleksi biru atau tidak terisi, pastikan `src/portal/aduankonten.js` memakai `humanFill()` versi terbaru.
-- Jika submit terlihat klik tapi tidak sukses, cek log `response submit`.
-- Jika Patchright tidak menemukan browser, set `ADUANKONTEN_BROWSER_CHANNEL=chrome`.
+- Jika SeleniumBase belum terinstall, jalankan `npm run setup:aduankonten`.
+- Jika Python tidak ditemukan, set `ADUANKONTEN_PYTHON`.
+- Jika submit terlihat klik tapi tidak sukses, cek HTML/screenshot debug.
 - Jika debug aktif, cek HTML/screenshot di `debug/aduankonten/`.

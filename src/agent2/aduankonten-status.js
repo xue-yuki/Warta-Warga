@@ -120,7 +120,7 @@ function reportLabel(report) {
 }
 
 async function fetchAndFormat(ticket, { context = "", parsed = null } = {}) {
-  parsed = parsed || (await fetchAduanKontenStatus(ticket, { headless: false }));
+  parsed = parsed || (await fetchAduanKontenStatus(ticket, { headless: true }));
   const prefix = context ? `Ini status laporan AduanKonten ${context}:\n\n` : "";
   return `${prefix}${buildAduanKontenStatusText(ticket, parsed, { kind: "manual" })}`;
 }
@@ -132,7 +132,7 @@ async function findReportByKeywordFromStatus(reports, keyword) {
     const ticket = cleanText(report?.nomor_ticket).toUpperCase();
     if (!isLikelySupportCode(ticket)) continue;
     try {
-      const parsed = await fetchAduanKontenStatus(ticket, { headless: false });
+      const parsed = await fetchAduanKontenStatus(ticket, { headless: true });
       if (scoreTextForKeyword(statusHaystack(parsed), keyword) > 0) {
         return { report, parsed };
       }

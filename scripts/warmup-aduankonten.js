@@ -19,7 +19,11 @@ async function main() {
   console.log("[warmup-aduankonten] browser:", headless ? "headless" : "headed");
   console.log("[warmup-aduankonten] wait ms:", waitMs);
   if (debugDir) console.log("[warmup-aduankonten] debug dir:", debugDir);
-  console.log("[warmup-aduankonten] Selesaikan Cloudflare secara manual jika muncul. Script lanjut otomatis setelah form search terlihat.");
+  console.log(
+    headless
+      ? "[warmup-aduankonten] SeleniumBase akan mencoba melewati Cloudflare otomatis sampai form search terlihat."
+      : "[warmup-aduankonten] Jika Cloudflare muncul, selesaikan di browser. Script lanjut otomatis setelah form search terlihat.",
+  );
 
   const result = await warmupAduanKontenSession({
     headless,
