@@ -12,7 +12,10 @@ const REPORT_WORDS = /\b(lapor(?:kan|in)?|pengaduan|aduan|adukan|report|blokir|b
 const EXPLICIT_ADUANKONTEN_HINTS = /\b(aduan\s*konten|konten\s*negatif|blokir|blokirkan|takedown|take\s*down)\b/i;
 const WEB_REPORT_HINTS = /\b(situs|website|web|url|link|domain|akun|aplikasi)\b/i;
 const NEGATIVE_CONTENT_HINTS = /\b(judi|slot|togel|casino|taruhan|betting|penipuan|phishing|scam|hoaks|hoax|pinjol\s*ilegal|investasi\s*ilegal|pornografi|porno|pemerasan|malware|retas|kebocoran\s*data)\b/i;
-const GAMBLING_SITE_HINTS = /(?:\b(judi|slot|togel|casino|taruhan|betting|gacor|maxwin|scatter|pragmatic|pgsoft|habanero|spadegaming|sbobet|poker|roulette|blackjack|jackpot|zeus|olympus)\b|rtp\s*slot|mahjong\s*ways|starlight\s*princess|\bslot\d+\b|\bdewa\d+[a-z0-9-]*\b)/i;
+const GAMBLING_SITE_HINTS = /(?:\b(judol|judi|slot|togel|casino|taruhan|betting|gacor|maxwin|scatter|pragmatic|pgsoft|habanero|spadegaming|sbobet|poker|roulette|blackjack|jackpot|zeus|olympus)\b|rtp\s*slot|mahjong\s*ways|starlight\s*princess|easy\s*win|pasti\s*bayar|main\s*game|\b(?:judi|slot|togel|casino)\d+[a-z0-9-]*\b)/i;
+const GAMBLING_BRAND_CODE_HINTS =
+  /\b(?:(?:qq|judi|slot|togel|casino|dewa|koko|otaku|tokyo|sultan|raja|mega|bola|mpo|idn|naga|hoki|cuan|cina|gaza)[a-z0-9-]*(?:26|66|77|88|89|99|101|123|138|365|500|666|777|888)[a-z0-9-]*|(?:qq|mpo|idn)\d{2,}[a-z0-9-]*)\b/i;
+const SHORTENER_HOST_HINTS = /\b(?:bit\.ly|cutt\.ly|rebrand\.ly|tinyurl\.com|s\.id|cek\.to|t\.co|is\.gd|shorturl\.at)\b/i;
 const PENDING_TTL = 15 * 60 * 1000;
 const RECENT_URL_TTL = 30 * 60 * 1000;
 
@@ -75,7 +78,16 @@ function isContextualReportIntent(text) {
 }
 
 function isDangerousUrlReply(reply) {
-  return /\b(BAHAYA|jangan buka|berbahaya|penipuan|phishing|scam|judi|slot|togel|casino|konten negatif|link mencurigakan|situs mencurigakan)\b/i.test(String(reply || ""));
+  return /\b(BAHAYA|waspada|hati-hati|jangan\s+(?:buka|klik|bagikan)|berbahaya|penipuan|phishing|scam|judi|slot|togel|casino|konten negatif|link mencurigakan|situs mencurigakan|bukan\s+(?:link|domain|situs)\s+resmi|domain\s+resmi|minta\s+data\s+pribadi|otp|blokir\s+pengirim)\b/i.test(String(reply || ""));
+}
+
+function isSafeOfficialUrlReply(reply) {
+  const value = String(reply || "");
+  return /^\s*(?:✅\s*)?AMAN\b/i.test(value) || /\b(domain\s+\.go\.id\s+resmi|resmi\s+milik|situs\s+resmi|link\s+resmi|situs\s+memang\s+untuk)\b/i.test(value);
+}
+
+function isSuspiciousUrlMessage(text) {
+  return /\b(link|url|website|situs|domain)\b[\s\S]{0,80}\b(aneh|mencurigakan|bahaya|waspada|judi|slot|togel|casino|penipuan|phishing|scam|tidak\s+resmi|nggak\s+jelas|ga\s+jelas|gak\s+jelas)\b/i.test(String(text || ""));
 }
 
 function normalizeCategoryKey(value) {
@@ -96,7 +108,7 @@ function normalizeCategoryKey(value) {
 
 function detectCategoryHintKey(text, url = "") {
   const hay = `${text || ""} ${url || ""}`.toLowerCase();
-  if (GAMBLING_SITE_HINTS.test(hay)) return "perjudian";
+  if (GAMBLING_SITE_HINTS.test(hay) || GAMBLING_BRAND_CODE_HINTS.test(hay)) return "perjudian";
   if (/\b(hoaks|hoax|berita bohong|disinformasi|misinformasi)\b/i.test(hay)) return "hoaks";
   if (/\b(phishing|scam|penipuan|tipu|otp|rekening|hadiah|undian|login palsu|akun palsu)\b/i.test(hay)) return "penipuan";
   if (/\b(pornografi|porno|seksual eksplisit)\b/i.test(hay)) return "pornografi";
@@ -110,6 +122,11 @@ function detectCategoryKey(text, url = "") {
   const hinted = detectCategoryHintKey(text, url);
   if (hinted) return hinted;
   return "penipuan";
+}
+
+function categoryById(categoryId) {
+  const id = String(categoryId || "");
+  return Object.values(ADUANKONTEN_CATEGORIES).find((item) => item.id === id) || null;
 }
 
 function defaultReason(categoryKey, url) {
@@ -185,12 +202,22 @@ function describeInspectionTarget(inspection, fallbackUrl) {
   return "konten tersebut";
 }
 
+function isGenericInspectionTarget(inspection, url) {
+  const title = String(inspection?.page_title || "").trim();
+  const host = inspection?.host || hostFromUrl(inspection?.final_url || url) || "";
+  return inspection?.render_diblokir || SHORTENER_HOST_HINTS.test(host) || /\b(just a moment|attention required|checking your browser|please wait)\b/i.test(title);
+}
+
 function reasonFromInspection({ url, categoryKey, inspection, userReason }) {
   const target = describeInspectionTarget(inspection, url);
   const finalUrl = inspection?.final_url && inspection.final_url !== url ? inspection.final_url : null;
   const redirectNote = finalUrl ? ` URL pendek tersebut mengarah ke ${finalUrl}.` : "";
 
   if (categoryKey === "perjudian") {
+    const gamblingEvidence = `${url || ""} ${inspectionHaystack(inspection)}`;
+    if (GAMBLING_BRAND_CODE_HINTS.test(gamblingEvidence) && isGenericInspectionTarget(inspection, url)) {
+      return `Berdasarkan pemeriksaan awal, URL ${url} mengandung pola brand/kode yang sering digunakan situs judi online, sehingga perlu ditinjau sebagai perjudian.${redirectNote}`;
+    }
     return `Berdasarkan pemeriksaan awal, URL ${url} mengarah ke ${target} yang diduga memuat promosi atau layanan perjudian online.${redirectNote}`;
   }
   if (categoryKey === "hoaks") {
@@ -246,6 +273,10 @@ async function classifyWithInspection({ url, userReason, categoryKey, inspection
           content:
             "Kamu mengklasifikasikan hasil pemeriksaan awal URL untuk laporan aduankonten.id. " +
             "Gunakan hanya data pemeriksaan yang diberikan. Jangan mengarang fakta. " +
+            "Pilih kategori utama dari isi/final URL/judul halaman, bukan hanya dari field form. " +
+            "Jika final_url, host, redirect_chain, atau page_title menunjukkan judi online/judol seperti judi, slot, togel, casino, sabung ayam, sportsbook, betting, gacor, easy win, pasti bayar, cuan pada konteks permainan uang, atau brand berkode angka seperti CINA777/GAZA88/QQ101, categoryKey wajib perjudian. " +
+            "Halaman judi yang meminta username/password/OTP/rekening tetap dikategorikan perjudian, bukan penipuan, kecuali tidak ada sinyal judi sama sekali. " +
+            "Gunakan penipuan hanya untuk phishing/scam/pengambilan data tanpa sinyal judi/pornografi/hoaks/kategori spesifik lain. " +
             "Return JSON valid: {\"categoryKey\":\"pornografi|perjudian|pencemaran|penipuan|sara|kekerasan|produk_khusus|terorisme|separatisme|hki|keamanan_informasi|rekomendasi_sektor|sosial_budaya|hoaks|pemerasan\",\"reason\":\"alasan laporan 1 kalimat, minimal 20 karakter, diawali 'Berdasarkan pemeriksaan awal' jika memakai hasil pemeriksaan\"}.",
         },
         {
@@ -268,6 +299,7 @@ async function classifyWithInspection({ url, userReason, categoryKey, inspection
                 field_mencurigakan: inspection.field_mencurigakan,
                 render_diblokir: inspection.render_diblokir,
                 error: inspection.error,
+                inspected_text: inspectedText.slice(0, 1200),
               },
             },
             null,
@@ -276,12 +308,13 @@ async function classifyWithInspection({ url, userReason, categoryKey, inspection
         },
       ],
     });
-    const parsedCategory = inspectionCategory || normalizeCategoryKey(parsed?.categoryKey) || fallback.categoryKey;
+    const llmCategory = normalizeCategoryKey(parsed?.categoryKey);
+    const parsedCategory = inspectionCategory === "perjudian" && llmCategory === "penipuan" ? "perjudian" : llmCategory || inspectionCategory || fallback.categoryKey;
     const parsedReason = String(parsed?.reason || "").trim();
     const fallbackReason = reasonFromInspection({ url, categoryKey: parsedCategory, inspection, userReason });
     return {
       categoryKey: parsedCategory,
-      reason: inspectionCategory ? fallbackReason : parsedReason.length >= 20 && !isWeakReason(parsedReason) ? parsedReason.slice(0, 800) : fallbackReason,
+      reason: parsedCategory === inspectionCategory ? fallbackReason : parsedReason.length >= 20 && !isWeakReason(parsedReason) ? parsedReason.slice(0, 800) : fallbackReason,
     };
   } catch {
     return fallback;
@@ -371,7 +404,8 @@ const ASK_REASON = "Tambahkan alasan laporannya minimal 20 huruf. Contoh: situs 
 const ASK_CONFIRM = (categoryKey, url, reason) => {
   const category = ADUANKONTEN_CATEGORIES[categoryKey] || ADUANKONTEN_CATEGORIES.penipuan;
   return (
-    `Ini laporan Aduan Konten untuk *${category.label}*:\n` +
+    `Apakah Bapak/Ibu mau saya buatkan laporan pengaduan terkait link *${url}* dengan data berikut?\n\n` +
+    `Laporan Aduan Konten untuk *${category.label}*:\n` +
     `URL: ${url}\n` +
     `Alasan: ${reason}\n\n` +
     "Balas *Ya* untuk saya kirim ke aduankonten.id, atau *Tidak* untuk batal."
@@ -406,10 +440,30 @@ function buildData(parsed, previous = {}, media = {}) {
   };
 }
 
-export async function handleLaporKonten({ text, imageText = null, imageBuffer = null, imageMimetype = null, sessionId = null, messageId = null }) {
+export async function handleLaporKonten({
+  text,
+  imageText = null,
+  imageBuffer = null,
+  imageMimetype = null,
+  sessionId = null,
+  messageId = null,
+  onSubmitStart = null,
+  onSubmitResult = null,
+  onSubmitDone = null,
+}) {
   const pending = getPending(sessionId);
   if (pending) {
-    return consumeLaporKontenReply({ sessionId, text, imageText, imageBuffer, imageMimetype, messageId });
+    return consumeLaporKontenReply({
+      sessionId,
+      text,
+      imageText,
+      imageBuffer,
+      imageMimetype,
+      messageId,
+      onSubmitStart,
+      onSubmitResult,
+      onSubmitDone,
+    });
   }
 
   let message = [text, imageText].filter(Boolean).join("\n\n");
@@ -451,7 +505,8 @@ export async function handleLaporKonten({ text, imageText = null, imageBuffer = 
 export async function maybeOfferAduanKontenReport({ text, reply, imageText = null, imageBuffer = null, imageMimetype = null, sessionId = null, messageId = null }) {
   const message = [text, imageText].filter(Boolean).join("\n\n");
   const url = extractUrl(message);
-  if (!url || !reply || !isDangerousUrlReply(reply)) return reply;
+  if (!url || !reply || isSafeOfficialUrlReply(reply)) return reply;
+  if (!url || !reply || (!isDangerousUrlReply(reply) && !isSuspiciousUrlMessage(message))) return reply;
   if (getPending(sessionId)) return reply;
 
   rememberKontenUrl(sessionId, url);
@@ -461,10 +516,47 @@ export async function maybeOfferAduanKontenReport({ text, reply, imageText = nul
 
   if (!data?.url || !data?.reason) return reply;
   pendingKonten.set(sessionId, { stage: "confirm", data, ts: Date.now() });
-  return `${reply}\n\n${ASK_CONFIRM(data.categoryKey, data.url, data.reason)}`;
+  return {
+    reply,
+    followupReply: ASK_CONFIRM(data.categoryKey, data.url, data.reason),
+  };
 }
 
-async function consumeLaporKontenReply({ sessionId, text, imageText = null, imageBuffer = null, imageMimetype = null, messageId = null }) {
+function runSubmitInBackground(pendingData, { onSubmitStart = null, onSubmitResult = null, onSubmitDone = null } = {}) {
+  void (async () => {
+    try {
+      await onSubmitStart?.();
+      const result = await submitPendingLaporKonten(pendingData);
+      await onSubmitResult?.(result);
+    } catch (err) {
+      const message = err?.message || String(err || "error tidak diketahui");
+      console.warn("[aduankonten] background submit gagal:", message);
+      try {
+        await onSubmitResult?.({ reply: `Gagal mengirim laporan ke aduankonten.id karena: ${message}` });
+      } catch (notifyErr) {
+        console.warn("[aduankonten] gagal mengirim notifikasi hasil submit:", notifyErr?.message || notifyErr);
+      }
+    } finally {
+      try {
+        await onSubmitDone?.();
+      } catch {
+        // ignore
+      }
+    }
+  })();
+}
+
+async function consumeLaporKontenReply({
+  sessionId,
+  text,
+  imageText = null,
+  imageBuffer = null,
+  imageMimetype = null,
+  messageId = null,
+  onSubmitStart = null,
+  onSubmitResult = null,
+  onSubmitDone = null,
+}) {
   const pending = getPending(sessionId);
   if (!pending) return null;
 
@@ -496,7 +588,16 @@ async function consumeLaporKontenReply({ sessionId, text, imageText = null, imag
     }
 
     pendingKonten.delete(sessionId);
-    return submitPendingLaporKonten({ ...pending.data, sessionId });
+    const submitData = { ...pending.data, sessionId };
+    if (typeof onSubmitResult === "function") {
+      runSubmitInBackground(submitData, { onSubmitStart, onSubmitResult, onSubmitDone });
+      return {
+        reply:
+          "Baik, laporan sedang saya kirim ke aduankonten.id. " +
+          "Proses ini bisa agak lama karena portal perlu membuka dan memeriksa halaman. Nanti saya kabari hasilnya di chat ini.",
+      };
+    }
+    return submitPendingLaporKonten(submitData);
   }
 
   pendingKonten.delete(sessionId);
@@ -546,13 +647,17 @@ async function submitPendingLaporKonten({ url, categoryKey, reason, imageBuffer,
     }
 
     if (result.success) {
+      const finalCategory = categoryById(result.categoryId) || (result.categoryLabel ? { label: result.categoryLabel } : null) || category;
+      const finalKategori = `aduankonten:${finalCategory.label}`;
       await updateLaporanLayananStatus(id, "submitted", {
+        kategori: finalKategori,
         nomor_ticket: result.ticketNumber || null,
         submitted_at: new Date().toISOString(),
         notes: "Dikirim otomatis ke AduanKonten",
       });
       await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "success", errorMsg: null });
-      return { reply: `Laporan sudah dikirim ke aduankonten.id. Kode laporan: *${result.ticketNumber || "tidak tersedia"}*.` };
+      const categoryNote = finalCategory.label !== category.label ? `\nKategori final: *${finalCategory.label}*.` : "";
+      return { reply: `Laporan sudah dikirim ke aduankonten.id. Kode laporan: *${result.ticketNumber || "tidak tersedia"}*.${categoryNote}` };
     }
 
     const error = result.error || "AduanKonten tidak mengembalikan status sukses";

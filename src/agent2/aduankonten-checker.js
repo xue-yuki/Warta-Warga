@@ -97,6 +97,9 @@ function detailLines(parsed) {
   if (d.category) lines.push(`Kandungan konten: ${d.category}`);
   if (d.reportedUrl) lines.push(`Link laporan: ${d.reportedUrl}`);
   if (d.previewTitle) lines.push(`Tinjauan: ${d.previewTitle}`);
+  if (d.previewTitle && !/perjudian/i.test(d.category || "") && /\b(judol|judi|slot|togel|casino|sabung\s*ayam|sportsbook|gacor|taruhan|betting)\b/i.test(d.previewTitle)) {
+    lines.push("Catatan: Tinjauan halaman mengandung sinyal perjudian. Untuk laporan baru, bot akan memakai kategori Perjudian saat preview AduanKonten menunjukkan pola ini.");
+  }
   if (d.totalPelapor) lines.push(`Total pelapor: ${d.totalPelapor}`);
   if (d.tanggalLapor) lines.push(`Tanggal lapor: ${d.tanggalLapor}`);
   if (d.tanggalDiperbarui) lines.push(`Terakhir diperbarui: ${d.tanggalDiperbarui}`);

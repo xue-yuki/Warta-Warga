@@ -63,10 +63,73 @@ function uniqueItems(items) {
   return out;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function tempJsonPath(prefix) {
   const dir = path.join(os.tmpdir(), "warta-warga-aduankonten");
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+}
+
+function lockFilePath() {
+  const dir = USER_DATA_DIR || path.join(os.tmpdir(), "warta-warga-aduankonten");
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, ".seleniumbase.lock");
+}
+
+async function acquireSeleniumBaseLock(operation, timeoutMs, debugDir = "") {
+  const lockPath = lockFilePath();
+  const deadline = Date.now() + Math.max(60000, timeoutMs);
+  const staleMs = Math.max(30 * 60 * 1000, timeoutMs + 5 * 60 * 1000);
+  let warned = false;
+
+  while (Date.now() < deadline) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(
+        fd,
+        JSON.stringify({
+          pid: process.pid,
+          operation,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      return () => {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // ignore
+        }
+        fs.rmSync(lockPath, { force: true });
+      };
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+
+      let stale = false;
+      try {
+        const stat = fs.statSync(lockPath);
+        stale = Date.now() - stat.mtimeMs > staleMs;
+      } catch {
+        stale = true;
+      }
+
+      if (stale) {
+        fs.rmSync(lockPath, { force: true });
+        continue;
+      }
+
+      if (!warned && debugDir) {
+        console.log(`[aduankonten] SeleniumBase sedang dipakai proses lain. Menunggu lock: ${lockPath}`);
+        warned = true;
+      }
+      await sleep(1000);
+    }
+  }
+
+  throw new Error(
+    `AduanKonten SeleniumBase sedang dipakai proses lain terlalu lama. ` +
+      `Stop proses npm start/warmup AduanKonten yang masih berjalan, lalu hapus lock jika perlu: ${lockPath}`,
+  );
 }
 
 function splitCommand(value) {
@@ -96,17 +159,21 @@ async function runSeleniumBase(operation, payload = {}, { timeoutMs = 360000 } =
     throw new Error(`Driver SeleniumBase AduanKonten tidak ditemukan: ${DRIVER_SCRIPT}`);
   }
 
-  const inputPath = tempJsonPath("input");
-  const outputPath = tempJsonPath("output");
-  const driverPayload = buildDriverPayload(operation, payload);
-  fs.writeFileSync(inputPath, JSON.stringify(driverPayload), "utf8");
-
-  const [command, extraArgs] = splitCommand(PYTHON_BIN);
-  const args = [...extraArgs, DRIVER_SCRIPT, "--input", inputPath, "--output", outputPath];
+  const releaseLock = await acquireSeleniumBaseLock(operation, timeoutMs, payload.debugDir ?? DEBUG_DIR);
+  let inputPath = null;
+  let outputPath = null;
   let stdout = "";
   let stderr = "";
 
   try {
+    inputPath = tempJsonPath("input");
+    outputPath = tempJsonPath("output");
+    const driverPayload = buildDriverPayload(operation, payload);
+    fs.writeFileSync(inputPath, JSON.stringify(driverPayload), "utf8");
+
+    const [command, extraArgs] = splitCommand(PYTHON_BIN);
+    const args = [...extraArgs, DRIVER_SCRIPT, "--input", inputPath, "--output", outputPath];
+
     const exitCode = await new Promise((resolve, reject) => {
       const child = spawn(command, args, {
         cwd: ROOT,
@@ -152,7 +219,10 @@ async function runSeleniumBase(operation, payload = {}, { timeoutMs = 360000 } =
 
     if (exitCode !== 0) {
       const detail = cleanText(stderr || stdout).slice(0, 2000);
-      throw new Error(`SeleniumBase AduanKonten keluar dengan kode ${exitCode}${detail ? `: ${detail}` : ""}`);
+      const hint = /session not created|chrome not reachable|cannot connect to chrome/i.test(detail)
+        ? " Kemungkinan ada Chrome/uc_driver/profile AduanKonten yang masih aktif dari proses sebelumnya. Stop npm start/warmup lain, lalu tutup proses uc_driver/Chrome yang memakai .aduankonten_profile sebelum mencoba lagi."
+        : "";
+      throw new Error(`SeleniumBase AduanKonten keluar dengan kode ${exitCode}${detail ? `: ${detail}` : ""}${hint}`);
     }
 
     if (!result) {
@@ -167,8 +237,9 @@ async function runSeleniumBase(operation, payload = {}, { timeoutMs = 360000 } =
 
     return result;
   } finally {
-    fs.rmSync(inputPath, { force: true });
-    fs.rmSync(outputPath, { force: true });
+    if (inputPath) fs.rmSync(inputPath, { force: true });
+    if (outputPath) fs.rmSync(outputPath, { force: true });
+    releaseLock();
   }
 }
 
