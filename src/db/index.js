@@ -628,6 +628,10 @@ export async function updateLaporanLayananStatus(id, status, fields = {}) {
     updates.push("nomor_ticket = ?");
     params.push(fields.nomor_ticket);
   }
+  if (fields.kategori !== undefined) {
+    updates.push("kategori = ?");
+    params.push(fields.kategori);
+  }
   if (fields.submitted_at !== undefined) {
     updates.push("submitted_at = ?");
     params.push(fields.submitted_at);
@@ -654,6 +658,10 @@ export async function updateLaporanLayananStatus(id, status, fields = {}) {
     if (fields.nomor_ticket !== undefined) {
       setters.push(`nomor_ticket = $${values.length + 1}`);
       values.push(fields.nomor_ticket);
+    }
+    if (fields.kategori !== undefined) {
+      setters.push(`kategori = $${values.length + 1}`);
+      values.push(fields.kategori);
     }
     if (fields.submitted_at !== undefined) {
       setters.push(`submitted_at = $${values.length + 1}`);

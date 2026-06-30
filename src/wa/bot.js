@@ -5,7 +5,7 @@ import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, Disconn
 import { config, hasSearch, hasVision } from "../config.js";
 import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
-import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
+import { handleLaporKonten, hasPendingLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
 import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
@@ -374,13 +374,17 @@ async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null,
     return;
   }
 
-  // F2.2: di grup, hanya merespons saat di-mention. Selain itu DIAM (tak tandai dibaca/ketik).
+  // F2.2: di grup, hanya merespons saat di-mention. Pengecualian:
+  // balasan Ya/Tidak untuk pending AduanKonten dari pengirim yang sama.
   const mentioned = isMentioned(msg, sock);
+  const sender = userPart(msg.key.participant || msg.participant || jid);
+  const sessionId = `${jid}:${sender}`;
+  const hasPendingAduanKonten = hasPendingLaporKonten(sessionId);
   if (process.env.WA_DEBUG) {
     const ctx = unwrap(msg.message)?.extendedTextMessage?.contextInfo;
-    console.log("[grup-debug] mention=%s | bot.id=%s bot.lid=%s | mentionedJid=%j", mentioned, sock?.user?.id, sock?.user?.lid, ctx?.mentionedJid || []);
+    console.log("[grup-debug] mention=%s pendingAduanKonten=%s | bot.id=%s bot.lid=%s | mentionedJid=%j", mentioned, hasPendingAduanKonten, sock?.user?.id, sock?.user?.lid, ctx?.mentionedJid || []);
   }
-  if (!mentioned) return;
+  if (!mentioned && !hasPendingAduanKonten) return;
 
   await markRead(sock, msg);
   await presence(sock, jid, "composing");
@@ -393,14 +397,13 @@ async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null,
     }
     const scopeTags = groupScopeTags(grup);
     // Riwayat chat per-ORANG di dalam grup (bukan per-grup) → konteks follow-up tak kecampur antar warga.
-    const sender = userPart(msg.key.participant || msg.participant || jid);
     await handleContent(sock, jid, {
       text: cleanText || text,
       konteks: "grup",
       scopeTags,
       wilayahTag: grup?.wilayah_tag || null,
       send,
-      sessionId: `${jid}:${sender}`,
+      sessionId,
       imageText,
       imageBuffer,
       imageMimetype,
@@ -423,17 +426,64 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
   const target = detectWilayahFromText(text) || (isKabKota(wilayahTag) ? wilayahTag : null);
   const uncovered = target && isKabKota(target) && (await countInfoByWilayah(target)) === 0;
 
+  let aduanKontenTypingTimer = null;
+  let aduanKontenTypingReassert = null;
+  const startAduanKontenTyping = async () => {
+    await presence(sock, jid, "composing");
+    aduanKontenTypingReassert = setTimeout(() => {
+      aduanKontenTypingReassert = null;
+      if (aduanKontenTypingTimer) presence(sock, jid, "composing").catch(() => {});
+    }, 1200);
+    if (!aduanKontenTypingTimer) {
+      aduanKontenTypingTimer = setInterval(() => {
+        presence(sock, jid, "composing").catch(() => {});
+      }, 8000);
+    }
+  };
+  const stopAduanKontenTyping = async () => {
+    if (aduanKontenTypingReassert) {
+      clearTimeout(aduanKontenTypingReassert);
+      aduanKontenTypingReassert = null;
+    }
+    if (aduanKontenTypingTimer) {
+      clearInterval(aduanKontenTypingTimer);
+      aduanKontenTypingTimer = null;
+    }
+    await presence(sock, jid, "paused");
+  };
+
   // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
   // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
-  const aduanKontenStatusResult = await handleAduanKontenStatus({ text, sessionId });
+  const aduanKontenStatusResult = await handleAduanKontenStatus({
+    text,
+    sessionId,
+    onStatusStart: startAduanKontenTyping,
+    onStatusDone: stopAduanKontenTyping,
+  });
   if (aduanKontenStatusResult?.reply) {
     await send(aduanKontenStatusResult.reply);
     return;
   }
 
-  const kontenResult = await handleLaporKonten({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+  const kontenResult = await handleLaporKonten({
+    text,
+    imageText,
+    imageBuffer,
+    imageMimetype,
+    sessionId,
+    messageId,
+    onSubmitStart: startAduanKontenTyping,
+    onSubmitResult: async (result) => {
+      if (result?.reply) await send(result.reply);
+    },
+    onSubmitDone: stopAduanKontenTyping,
+  });
   if (kontenResult?.reply) {
     await send(kontenResult.reply);
+    if (kontenResult.followupReply) {
+      await delay(700);
+      await send(kontenResult.followupReply);
+    }
     return;
   }
 
@@ -475,8 +525,16 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
   }
 
   if (result.reply) {
-    const reply = await maybeOfferAduanKontenReport({ text, reply: result.reply, imageText, imageBuffer, imageMimetype, sessionId, messageId });
-    await send(reply);
+    const offerResult = await maybeOfferAduanKontenReport({ text, reply: result.reply, imageText, imageBuffer, imageMimetype, sessionId, messageId });
+    if (typeof offerResult === "string") {
+      await send(offerResult);
+    } else if (offerResult?.reply) {
+      await send(offerResult.reply);
+      if (offerResult.followupReply) {
+        await delay(700);
+        await send(offerResult.followupReply);
+      }
+    }
   }
 }
 

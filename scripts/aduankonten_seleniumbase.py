@@ -14,6 +14,32 @@ By = None
 Select = None
 WebDriverException = Exception
 
+ADUANKONTEN_CATEGORY_LABELS = {
+    "1": "Pornografi",
+    "2": "Perjudian",
+    "3": "Fitnah/Pencemaran Nama Baik",
+    "4": "Penipuan",
+    "5": "SARA",
+    "6": "Kekerasan/Kekerasan Pada Anak",
+    "7": "Perdagangan Produk dengan aturan khusus",
+    "8": "Terorisme/Radikalisme",
+    "9": "Separatisme/Organisasi Berbahaya",
+    "10": "Hak Kekayaan Intelektual",
+    "11": "Pelanggaran Keamanan Informasi",
+    "12": "Konten Negatif yang Direkomendasikan Instansi Sektor",
+    "13": "Konten yang Melanggar Nilai Sosial dan Budaya",
+    "14": "Berita Bohong/HOAKS",
+    "15": "Pemerasan",
+}
+
+GAMBLING_PREVIEW_RE = re.compile(
+    r"(judol|judi|perjudian|slot|togel|casino|sabung\s*ayam|sportsbook|taruhan|betting|gacor|maxwin|scatter|rtp\s*slot|"
+    r"pragmatic|pgsoft|habanero|spadegaming|sbobet|poker|roulette|blackjack|jackpot|zeus|olympus|easy\s*win|pasti\s*bayar|main\s*game|"
+    r"(?:qq|judi|slot|togel|casino|dewa|koko|otaku|tokyo|sultan|raja|mega|bola|mpo|idn|naga|hoki|cuan|cina|gaza)[a-z0-9-]*(?:26|66|77|88|89|99|101|123|138|365|500|666|777|888)[a-z0-9-]*|"
+    r"(?:qq|mpo|idn)\d{2,}[a-z0-9-]*)",
+    re.I,
+)
+
 
 def load_seleniumbase():
     global SB, By, Select, WebDriverException
@@ -131,6 +157,23 @@ def debug_suffix(snapshot):
 
 def has_cloudflare_text(text):
     return bool(re.search(r"Tunggu sebentar|Verifikasi keamanan|Just a moment|Checking your browser|Cloudflare|Verify you are human", text or "", re.I))
+
+
+def has_rate_limit_text(text):
+    return bool(re.search(r"\b429\b|Too Many Requests|rate limit|terlalu banyak permintaan", text or "", re.I))
+
+
+def wait_after_rate_limit(sb, payload, stage, attempt):
+    wait_seconds = min(90, 20 + max(0, attempt - 1) * 15)
+    log(f"AduanKonten rate limited during {stage}; waiting {wait_seconds}s before retry.")
+    time.sleep(wait_seconds)
+    try:
+        sb.refresh()
+    except Exception:
+        try:
+            open_with_reconnect(sb, base_url(payload) + "/")
+        except Exception:
+            pass
 
 
 def is_visible(sb, selector):
@@ -267,11 +310,17 @@ def open_home(sb, payload):
     open_with_reconnect(sb, home)
 
     deadline = time.time() + max(90, challenge_wait(payload) / 1000.0 + 10)
+    rate_limit_attempts = 0
     while time.time() < deadline:
         if is_visible(sb, "#search_url"):
             return
 
         text = body_text(sb)
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "home", rate_limit_attempts)
+            continue
+
         if has_cloudflare_text(text):
             solve_challenge(sb, payload)
             try:
@@ -287,18 +336,28 @@ def open_home(sb, payload):
         time.sleep(1)
 
     snapshot = save_debug_snapshot(sb, payload, "home-form-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat membuka halaman awal." + debug_suffix(snapshot))
     raise RuntimeError("Timeout menunggu form pencarian AduanKonten." + debug_suffix(snapshot))
 
 
 def wait_for_search_form(sb, payload):
     deadline = time.time() + max(90, challenge_wait(payload) / 1000.0 + 10)
+    rate_limit_attempts = 0
     while time.time() < deadline:
         if is_visible(sb, "#search_url") and is_visible(sb, "#btn-search-submit"):
             return
-        if has_cloudflare_text(body_text(sb)):
+        text = body_text(sb)
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "search-form", rate_limit_attempts)
+            continue
+        if has_cloudflare_text(text):
             solve_challenge(sb, payload)
         time.sleep(1)
     snapshot = save_debug_snapshot(sb, payload, "search-form-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat menunggu form pencarian." + debug_suffix(snapshot))
     raise RuntimeError("Timeout menunggu form search AduanKonten." + debug_suffix(snapshot))
 
 
@@ -341,6 +400,7 @@ def run_search(sb, payload, normalized_url):
 
         click(sb, "#btn-search-submit")
         deadline = time.time() + 100
+        rate_limit_attempts = 0
         while time.time() < deadline:
             url = current_url(sb)
             if re.search(r"/submission/submit-form\b", url, flags=re.I):
@@ -351,18 +411,27 @@ def run_search(sb, payload, normalized_url):
                 duplicate["url"] = normalized_url
                 return duplicate
 
-            if has_cloudflare_text(body_text(sb)):
+            text = body_text(sb)
+            if has_rate_limit_text(text):
+                rate_limit_attempts += 1
+                wait_after_rate_limit(sb, payload, "search-result", rate_limit_attempts)
+                break
+
+            if has_cloudflare_text(text):
                 solve_challenge(sb, payload)
                 break
 
             time.sleep(1)
 
     snapshot = save_debug_snapshot(sb, payload, "search-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat mencari URL." + debug_suffix(snapshot))
     raise RuntimeError("Timeout menunggu hasil pencarian URL di AduanKonten." + debug_suffix(snapshot))
 
 
 def wait_for_preview(sb, payload):
     deadline = time.time() + 140
+    rate_limit_attempts = 0
     while time.time() < deadline:
         if is_visible(sb, "#category_id"):
             try:
@@ -378,10 +447,17 @@ def wait_for_preview(sb, payload):
                     return
             except Exception:
                 return
-        if has_cloudflare_text(body_text(sb)):
+        text = body_text(sb)
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "preview", rate_limit_attempts)
+            continue
+        if has_cloudflare_text(text):
             solve_challenge(sb, payload)
         time.sleep(1)
     snapshot = save_debug_snapshot(sb, payload, "preview-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat menunggu preview/form submit." + debug_suffix(snapshot))
     raise RuntimeError("Timeout menunggu preview/form submit AduanKonten." + debug_suffix(snapshot))
 
 
@@ -396,6 +472,46 @@ def capture_attachment(sb, payload):
         except Exception as exc:
             raise RuntimeError(f"Gagal membuat lampiran screenshot: {exc}") from exc
     return out
+
+
+def preview_text(sb):
+    try:
+        value = sb.driver.execute_script(
+            """
+            const selectors = [
+              '[name="title_preview"]',
+              '#title_preview',
+              '.form-detail-preview [name="title_preview"]',
+              '.overflow-tinjauan [name="title_preview"]',
+              '.overflow-tinjauan .fw-bold',
+              '.content-laporan-mobile .fw-bold'
+            ];
+            const parts = [];
+            for (const selector of selectors) {
+              for (const el of document.querySelectorAll(selector)) {
+                const text = (el.innerText || el.textContent || el.value || '').trim();
+                if (text) parts.push(text);
+              }
+            }
+            return [...new Set(parts)].join(' ');
+            """
+        )
+        if value:
+            return clean_text(value)
+    except Exception:
+        pass
+    text = body_text(sb)
+    match = re.search(r"(?:Tinjauan Laporan|Tinjauan)[\s\S]{0,400}", text or "", flags=re.I)
+    return clean_text(match.group(0) if match else text)
+
+
+def infer_category_from_preview(sb, requested_category_id):
+    category_id = str(requested_category_id or "").strip()
+    title = preview_text(sb)
+    if category_id != "2" and GAMBLING_PREVIEW_RE.search(title or ""):
+        log(f"Preview indicates gambling; overriding category {category_id or '-'} -> 2. Preview: {title[:160]}")
+        category_id = "2"
+    return category_id, ADUANKONTEN_CATEGORY_LABELS.get(category_id), title
 
 
 def set_category(sb, category_id):
@@ -423,15 +539,22 @@ def upload_attachment(sb, attachment_path):
 
 def wait_for_success(sb, payload):
     deadline = time.time() + 120
+    rate_limit_attempts = 0
     while time.time() < deadline:
         url = current_url(sb)
         text = body_text(sb)
         if re.search(r"/page/success\b", url, flags=re.I) or re.search(r"Laporan Diterima|Kode Laporan", text or "", flags=re.I):
             return
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "submit-success", rate_limit_attempts)
+            continue
         if has_cloudflare_text(text):
             solve_challenge(sb, payload)
         time.sleep(1)
     snapshot = save_debug_snapshot(sb, payload, "submit-success-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError(f"AduanKonten masih mengembalikan 429 Too Many Requests setelah submit. URL terakhir: {current_url(sb)}." + debug_suffix(snapshot))
     raise RuntimeError(f"AduanKonten tidak menampilkan halaman sukses. URL terakhir: {current_url(sb)}." + debug_suffix(snapshot))
 
 
@@ -466,7 +589,10 @@ def submit_flow(sb, payload):
         return outcome
 
     wait_for_preview(sb, payload)
-    set_category(sb, payload.get("categoryId"))
+    final_category_id, final_category_label, preview_title = infer_category_from_preview(sb, payload.get("categoryId"))
+    if not final_category_id:
+        raise RuntimeError("Kategori AduanKonten wajib diisi")
+    set_category(sb, final_category_id)
     fill_value(sb, "#reason", reason)
     attachment = payload.get("attachmentPath") or capture_attachment(sb, payload)
     upload_attachment(sb, attachment)
@@ -483,6 +609,9 @@ def submit_flow(sb, payload):
         "duplicate": False,
         "ticketNumber": ticket,
         "url": normalized_url,
+        "categoryId": final_category_id,
+        "categoryLabel": final_category_label,
+        "previewTitle": preview_title,
     }
 
 
@@ -493,6 +622,7 @@ def status_flow(sb, payload):
 
     open_home(sb, payload)
     deadline = time.time() + 90
+    rate_limit_attempts = 0
     while time.time() < deadline:
         if is_visible(sb, "#submission_number"):
             break
@@ -500,12 +630,19 @@ def status_flow(sb, payload):
             click(sb, "#search_tiket")
             time.sleep(1)
             continue
-        if has_cloudflare_text(body_text(sb)):
+        text = body_text(sb)
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "status-form", rate_limit_attempts)
+            continue
+        if has_cloudflare_text(text):
             solve_challenge(sb, payload)
         time.sleep(1)
 
     if not is_visible(sb, "#submission_number"):
         snapshot = save_debug_snapshot(sb, payload, "status-form-timeout")
+        if has_rate_limit_text(body_text(sb)):
+            raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat membuka form Lacak Aduan." + debug_suffix(snapshot))
         raise RuntimeError("Timeout menunggu form Lacak Aduan AduanKonten." + debug_suffix(snapshot))
 
     fill_value(sb, "#submission_number", ticket)
@@ -515,10 +652,16 @@ def status_flow(sb, payload):
         submit_form_by_js(sb, 'form[action*="/submission/check"]')
 
     deadline = time.time() + 90
+    rate_limit_attempts = 0
     while time.time() < deadline:
         if re.search(r"/submission/detail/", current_url(sb), flags=re.I):
             return {"success": True, "ticket": ticket, "html": page_source(sb)}
-        if has_cloudflare_text(body_text(sb)):
+        text = body_text(sb)
+        if has_rate_limit_text(text):
+            rate_limit_attempts += 1
+            wait_after_rate_limit(sb, payload, "status-detail", rate_limit_attempts)
+            continue
+        if has_cloudflare_text(text):
             solve_challenge(sb, payload)
         time.sleep(1)
 
@@ -527,6 +670,8 @@ def status_flow(sb, payload):
         return {"success": True, "ticket": ticket, "html": html}
 
     snapshot = save_debug_snapshot(sb, payload, "status-detail-timeout")
+    if has_rate_limit_text(body_text(sb)):
+        raise RuntimeError("AduanKonten masih mengembalikan 429 Too Many Requests saat membuka detail status." + debug_suffix(snapshot))
     raise RuntimeError("Timeout menunggu detail status AduanKonten." + debug_suffix(snapshot))
 
 
@@ -559,11 +704,10 @@ def probe_flow(sb, payload):
 def sb_kwargs(payload):
     kwargs = {
         "uc": True,
-        "test": True,
         "locale_code": "id",
     }
     if payload.get("headless"):
-        kwargs["headless"] = True
+        kwargs["headless2"] = True
     else:
         kwargs["headed"] = True
 

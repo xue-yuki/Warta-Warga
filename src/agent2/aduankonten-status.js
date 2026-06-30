@@ -144,8 +144,10 @@ async function findReportByKeywordFromStatus(reports, keyword) {
   return null;
 }
 
-export async function handleAduanKontenStatus({ text, sessionId = null }) {
+export async function handleAduanKontenStatus({ text, sessionId = null, onStatusStart = null, onStatusDone = null }) {
   if (!isStatusIntent(text)) return null;
+  await onStatusStart?.();
+  try {
 
   const ticket = extractTicket(text);
   if (ticket) {
@@ -223,5 +225,8 @@ export async function handleAduanKontenStatus({ text, sessionId = null }) {
         `Saya belum bisa mengambil status AduanKonten untuk kode *${selectedTicket}*.\n` +
         `Detail error: ${err?.message || err}`,
     };
+  }
+  } finally {
+    await onStatusDone?.();
   }
 }

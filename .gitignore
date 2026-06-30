@@ -5,6 +5,9 @@ node_modules/
 .aduankonten_profile/
 .laporgub_session.json
 debug/
+downloaded_files/
+latest_logs/
+__pycache__/
 .claude/
 aduankontenid.txt
 aduankonten_followup.txt
