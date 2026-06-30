@@ -168,28 +168,35 @@ export function createDashboardApp() {
       return res.status(400).json({ ok: false, error: 'ids and wilayahTag required' });
     }
 
-    // 1. Generate peringatan poster via AI
-    const imageId = `peringatan_${wilayahTag.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}`;
-    const imagePath = await generatePeringatanPoster({
-      kategori: kategori || 'Penipuan',
-      wilayah: humanWilayah(wilayahTag),
-      total: total || ids.length,
-      deskripsi: deskripsi || teksPeringatan || '',
-      imageId,
-    }).catch((e) => { console.warn('[Cluster] poster gagal:', e.message); return null; });
-
-    // 2. Mark semua laporan dalam cluster sebagai disetujui
+    // 1. Mark semua laporan dalam cluster sebagai disetujui (sebelum generate poster
+    //    agar laporan sudah approved jika bot disconnect saat generate berjalan).
     const finalTeks = teksPeringatan || deskripsi || '';
     for (const id of ids) {
       await setApprovalLaporan(Number(id), 'disetujui', finalTeks).catch(() => {});
     }
 
-    // 3. Broadcast peringatan dari laporan representatif (dengan poster)
+    // 2. Generate poster hanya jika bot sedang terhubung — jika offline, skip dan biarkan
+    //    broadcastPendingPeringatan (dipicu saat reconnect) yang handle generate + kirim.
+    let imagePath = null;
+    if (hasBroadcaster()) {
+      const imageId = `peringatan_${wilayahTag.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}`;
+      imagePath = await generatePeringatanPoster({
+        kategori: kategori || 'Penipuan',
+        wilayah: humanWilayah(wilayahTag),
+        total: total || ids.length,
+        deskripsi: deskripsi || finalTeks || '',
+        imageId,
+      }).catch((e) => { console.warn('[Cluster] poster gagal:', e.message); return null; });
+    } else {
+      console.log(`[Cluster] bot offline — skip generate poster, pending poller akan kirim saat reconnect.`);
+    }
+
+    // 3. Broadcast peringatan dari laporan representatif (dengan poster jika ada)
     const repId = Number(ids[0]);
     const laporan = await getLaporan(repId);
     const r = await broadcastPeringatan(laporan, { imagePath }).catch((e) => ({ sent: 0, reason: e.message }));
 
-    console.log(`[Cluster] ✅ broadcast-cluster wilayah=${wilayahTag} ids=${ids.join(',')} sent=${r.sent} poster=${imagePath || 'none'}`);
+    console.log(`[Cluster] broadcast-cluster wilayah=${wilayahTag} ids=${ids.join(',')} sent=${r.sent} reason=${r.reason || 'ok'} poster=${imagePath || 'none'}`);
     return res.json({ ok: true, sent: r.sent || 0, grupCount: r.grupCount || 0, imagePath: imagePath || null, reason: r.reason });
   });
 

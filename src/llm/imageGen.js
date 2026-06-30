@@ -52,6 +52,10 @@ function safeAssetId(record, explicitImageId) {
  * @param {{ kategori:string, wilayah:string, total:number, deskripsi:string, imageId?:string }} opts
  * @returns {Promise<string|null>} absolute path to saved image, or null if failed.
  */
+// Circuit breaker: jika kena billing/quota limit, jangan coba lagi sampai waktu ini.
+let _imageGenDisabledUntil = 0;
+const IMAGE_GEN_BACKOFF_MS = 30 * 60 * 1000; // 30 menit
+
 export async function generatePeringatanPoster({ kategori, wilayah, total, deskripsi, imageId } = {}) {
   const apiKey = config.images.apiKey;
   const baseUrl = config.images.baseUrl;
@@ -60,6 +64,12 @@ export async function generatePeringatanPoster({ kategori, wilayah, total, deskr
 
   if (!apiKey) {
     console.log('[ImageGen] ⚠️ API key not set — skipping peringatan poster.');
+    return null;
+  }
+
+  if (Date.now() < _imageGenDisabledUntil) {
+    const menit = Math.ceil((_imageGenDisabledUntil - Date.now()) / 60000);
+    console.log(`[ImageGen] ⏸ Image gen dinonaktifkan sementara (billing/quota). Coba lagi dalam ~${menit} menit.`);
     return null;
   }
 
@@ -93,7 +103,14 @@ Visual style:
     console.log(`[ImageGen] ✅ Saved peringatan poster: ${filePath}`);
     return filePath;
   } catch (err) {
-    console.error(`[ImageGen] ❌ Peringatan poster failed: ${err.message}`);
+    const msg = err.message || '';
+    // Billing atau quota habis → aktifkan circuit breaker, jangan spam API
+    if (err.status === 400 || err.status === 429 || msg.includes('Billing') || msg.includes('quota') || msg.includes('limit')) {
+      _imageGenDisabledUntil = Date.now() + IMAGE_GEN_BACKOFF_MS;
+      console.warn(`[ImageGen] ⚠️ Billing/quota limit — image gen dinonaktifkan 30 menit. (${msg})`);
+    } else {
+      console.error(`[ImageGen] ❌ Peringatan poster failed: ${msg}`);
+    }
     return null;
   }
 }

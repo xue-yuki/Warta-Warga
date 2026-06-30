@@ -235,19 +235,67 @@ export async function notifyPengurusUrgent(laporan) {
   return false;
 }
 
+function peringatanPublicContext(laporan) {
+  return [
+    laporan?.isi_ringkas,
+    laporan?.teks_peringatan,
+  ].map((v) => String(v || '').toLowerCase()).join(' ');
+}
+
+function isBansosContext(text) {
+  return /\b(bansos|bantuan sosial|pkh|blt|bpnt|kemensos|cekbansos|dinsos)\b/i.test(text);
+}
+
+function tipsAmanPeringatan(laporan) {
+  const text = peringatanPublicContext(laporan);
+  const tips = [];
+
+  if (/\b(otp|pin|password|kata sandi|kode sms|sms|kode rahasia|verifikasi)\b/i.test(text)) {
+    tips.push('• Jangan beri OTP/PIN/password/kode SMS kepada siapa pun.');
+  }
+  if (/\b(nik|kk|ktp|data pribadi|foto ktp|dokumen pribadi)\b/i.test(text)) {
+    tips.push('• Jangan kirim NIK, KK, foto KTP, atau data pribadi lewat chat/link tidak resmi.');
+  }
+  if (/\b(link|tautan|url|situs|formulir|apk|klik)\b/i.test(text)) {
+    tips.push('• Jangan klik tautan mencurigakan atau mengisi formulir dari pengirim tidak dikenal.');
+  }
+  if (/\b(transfer|rekening|biaya|admin|administrasi|jaminan|pajak|uang|bayar|pulsa|voucher)\b/i.test(text)) {
+    tips.push('• Jangan transfer uang, pulsa, voucher, atau biaya apa pun ke rekening/nomor pribadi.');
+  }
+  if (/\b(ngaku|mengaku|petugas|cs|customer service|bank|toko|kurir|dinsos|kelurahan)\b/i.test(text)) {
+    tips.push('• Verifikasi langsung ke kanal resmi instansi, bank, toko, atau pengurus setempat.');
+  }
+
+  if (isBansosContext(text)) {
+    tips.unshift('• Untuk bansos, cek hanya kanal resmi seperti cekbansos.kemensos.go.id atau Dinsos setempat.');
+  }
+
+  const fallback = tips.length
+    ? [
+        '• Simpan bukti chat, nomor, tautan, atau rekening untuk dilaporkan.',
+        '• Beri tahu keluarga/tetangga sekitar agar tidak mengikuti instruksi pelaku.',
+      ]
+    : [
+        '• Jangan beri OTP/PIN/password, data pribadi, uang, pulsa, atau voucher kepada pengirim tidak dikenal.',
+        '• Verifikasi klaim lewat kanal resmi sebelum mengikuti instruksi apa pun.',
+        '• Simpan bukti chat/nomor/rekening dan laporkan ke pengurus atau kanal pengaduan resmi.',
+      ];
+
+  for (const tip of fallback) {
+    if (tips.length >= 3) break;
+    tips.push(tip);
+  }
+
+  return [...new Set(tips)].slice(0, 3);
+}
+
 /** Susun kartu peringatan dini. UMUM & tanpa identitas pelapor (Rambu 2 PRD). */
 export function formatPeringatan(laporan) {
   const lines = [`⚠️ *Peringatan Dini Penipuan — ${humanWilayah(laporan.wilayah_tag)}*`, ''];
   // teks_peringatan = ringkasan modus yang sudah dibersihkan dari PII (oleh Agent saat lapor).
-  lines.push(laporan.teks_peringatan || laporan.isi_ringkas || 'Ada laporan modus penipuan mengatasnamakan bansos di daerah ini.');
+  lines.push(laporan.teks_peringatan || laporan.isi_ringkas || 'Ada laporan modus penipuan di daerah ini.');
   if (laporan.jumlah_serupa > 1) lines.push('', `📈 _${laporan.jumlah_serupa} laporan serupa diterima di daerah ini._`);
-  lines.push(
-    '',
-    '*Tips aman:*',
-    '• Bansos resmi *GRATIS* — tidak ada biaya/transfer/pulsa.',
-    '• Jangan beri OTP/PIN/NIK/data pribadi ke siapa pun.',
-    '• Cek hanya di cekbansos.kemensos.go.id atau tanya RT/pengurus.',
-  );
+  lines.push('', '*Tips aman:*', ...tipsAmanPeringatan(laporan));
   if (laporan.dasar_verifikasi) lines.push('', `_Dasar tinjauan: ${laporan.dasar_verifikasi}_`);
   lines.push('', '_Peringatan Warta Warga — disebar setelah ditinjau pengurus. Identitas pelapor tidak disimpan._');
   return lines.join('\n');
@@ -282,56 +330,84 @@ export async function broadcastTrenNasional(items, opts = {}) {
   return { sent: okGrup };
 }
 
+// Guard: cegah concurrent run (mis. dipicu reconnect berulang dalam detik yang sama)
+let _pendingBroadcastRunning = false;
+
 /**
  * Poll Supabase tiap interval: broadcast laporan yang sudah di-approve web dashboard
  * tapi belum pernah dikirim. Generate poster dulu, lalu kirim ke grup wilayah.
  */
 export async function broadcastPendingPeringatan() {
   if (!_sender) return { sent: 0, infos: 0 };
-  const pending = await listLaporanApprovedPendingBroadcast().catch(() => []);
-  if (pending.length === 0) return { sent: 0, infos: 0 };
-
-  console.log(`[PendingBroadcast] ${pending.length} laporan approved menunggu broadcast...`);
-  let sent = 0;
-  let infos = 0;
-
-  for (const l of pending) {
-    let imagePath = null;
-    try {
-      imagePath = await generatePeringatanPoster({
-        kategori: l.status === 'jelas_penipuan' ? 'Penipuan' : 'Misinformasi',
-        wilayah: humanWilayah(l.wilayah_tag),
-        total: l.jumlah_serupa || 1,
-        deskripsi: l.isi_ringkas,
-        imageId: `peringatan_${l.wilayah_tag}_${l.id}`.replace(/[^a-z0-9_]/gi, '_'),
-      });
-    } catch (e) {
-      console.warn(`[PendingBroadcast] poster gagal #${l.id}: ${e.message}`);
-    }
-    const r = await broadcastPeringatan(l, { imagePath }).catch((e) => ({ sent: 0, grupCount: 0, reason: e.message }));
-    sent += r.sent || 0;
-    if ((r.sent || 0) > 0) infos++;
+  if (_pendingBroadcastRunning) {
+    console.log('[PendingBroadcast] Masih berjalan, skip trigger ini.');
+    return { sent: 0, infos: 0 };
   }
+  _pendingBroadcastRunning = true;
+  try {
+    const pending = await listLaporanApprovedPendingBroadcast().catch(() => []);
+    if (pending.length === 0) return { sent: 0, infos: 0 };
 
-  if (sent > 0) console.log(`[PendingBroadcast] ✅ ${infos} peringatan → ${sent} grup.`);
-  return { sent, infos };
+    console.log(`[PendingBroadcast] ${pending.length} laporan approved menunggu broadcast...`);
+    let sent = 0;
+    let infos = 0;
+
+    for (const l of pending) {
+      if (!_sender) {
+        console.warn('[PendingBroadcast] Bot disconnect di tengah batch, hentikan.');
+        break;
+      }
+      let imagePath = null;
+      try {
+        imagePath = await generatePeringatanPoster({
+          kategori: l.status === 'jelas_penipuan' ? 'Penipuan' : 'Misinformasi',
+          wilayah: humanWilayah(l.wilayah_tag),
+          total: l.jumlah_serupa || 1,
+          deskripsi: l.isi_ringkas,
+          imageId: `peringatan_${l.wilayah_tag}_${l.id}`.replace(/[^a-z0-9_]/gi, '_'),
+        });
+      } catch (e) {
+        console.warn(`[PendingBroadcast] poster gagal #${l.id}: ${e.message}`);
+      }
+      const r = await broadcastPeringatan(l, { imagePath }).catch((e) => ({ sent: 0, grupCount: 0, reason: e.message }));
+      sent += r.sent || 0;
+      if ((r.sent || 0) > 0) infos++;
+    }
+
+    if (sent > 0) console.log(`[PendingBroadcast] ✅ ${infos} peringatan → ${sent} grup.`);
+    return { sent, infos };
+  } finally {
+    _pendingBroadcastRunning = false;
+  }
 }
 
 export async function broadcastPeringatan(laporan, { imagePath = null } = {}) {
-  if (!_sender) return { sent: 0, grupCount: 0, reason: 'no-sender' };
+  if (!_sender) {
+    console.warn(`[Peringatan] laporan #${laporan?.id} → no-sender (bot offline saat broadcast dipanggil).`);
+    return { sent: 0, grupCount: 0, reason: 'no-sender' };
+  }
   if (!laporan || laporan.status_approval !== 'disetujui') {
+    console.warn(`[Peringatan] laporan #${laporan?.id} → belum-disetujui (status_approval='${laporan?.status_approval}').`);
     return { sent: 0, grupCount: 0, reason: 'belum-disetujui' };
   }
   const key = String(laporan.id || '');
   if (key && _peringatanInFlight.has(key)) {
+    console.warn(`[Peringatan] laporan #${laporan.id} → sedang-dikirim (request duplikat, abaikan).`);
     return { sent: 0, grupCount: 0, reason: 'sedang-dikirim' };
   }
   if (key) _peringatanInFlight.add(key);
   try {
-    if (await wasPeringatanSent(laporan.id)) return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
+    if (await wasPeringatanSent(laporan.id)) {
+      console.log(`[Peringatan] laporan #${laporan.id} → sudah-dikirim sebelumnya, skip.`);
+      return { sent: 0, grupCount: 0, reason: 'sudah-dikirim' };
+    }
 
     const targets = await grupsForWilayah(laporan.wilayah_tag);
-    if (targets.length === 0) return { sent: 0, grupCount: 0, reason: 'tak-ada-grup' };
+    if (targets.length === 0) {
+      console.warn(`[Peringatan] laporan #${laporan.id} (${laporan.wilayah_tag}) → tak-ada-grup terdaftar untuk wilayah ini.`);
+      return { sent: 0, grupCount: 0, reason: 'tak-ada-grup' };
+    }
+    console.log(`[Peringatan] laporan #${laporan.id} (${laporan.wilayah_tag}) → ${targets.length} grup ditemukan, mengirim...`);
 
     const text = formatPeringatan(laporan);
     const resolvedImage = imagePath && fs.existsSync(imagePath) ? imagePath : null;

@@ -15,7 +15,7 @@ import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
 import { describeImage } from "../agent2/vision.js";
 import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah } from "../util/wilayah.js";
 import { scrapeRegion } from "../agent1/scheduler.js";
-import { setBroadcaster } from "../agent1/broadcast.js";
+import { setBroadcaster, broadcastPendingPeringatan } from "../agent1/broadcast.js";
 
 // Stateless bot: hanya cache efemeral siapa yang sudah disapa (tidak dipersist → privasi).
 const greeted = new Set();
@@ -43,6 +43,7 @@ function recentlyAttempted(tag) {
 // Single-flight reconnect: cegah banyak socket bertumpuk (akar penyebab badai code 440).
 let _connecting = false;
 let _reconnectTimer = null;
+let _pendingBroadcastTimer = null;
 
 // Error transien libsignal/kirim-saat-tutup tidak boleh mematikan proses bot.
 let _guardsInstalled = false;
@@ -224,18 +225,32 @@ export async function startBot() {
           return sock.sendMessage(jid, { image: imageBuffer, caption: text });
         }
         return sock.sendMessage(jid, { text });
-      });      
-      
-            // Daftarkan pengirim notifikasi LaporGub agar follow-up bisa dikirim ke pelapor.
+      });
+
+      // Daftarkan pengirim notifikasi LaporGub agar follow-up bisa dikirim ke pelapor.
       setLaporgubNotifier((jid, text) => sock.sendMessage(jid, { text }));
       // Daftarkan pengirim notifikasi AduanKonten.
       setAduanKontenNotifier((jid, text) => sock.sendMessage(jid, { text }));
       startAgent2ServiceCheckers();
+
+      // Replay laporan approved saat bot offline hanya kalau auto-polling memang diaktifkan.
+      // Default mati supaya seed/demo rows yang pernah di-approve tidak langsung spam saat reconnect.
+      if (config.pendingBroadcast.autoPolling) {
+        if (_pendingBroadcastTimer) clearTimeout(_pendingBroadcastTimer);
+        _pendingBroadcastTimer = setTimeout(() => {
+          _pendingBroadcastTimer = null;
+          broadcastPendingPeringatan().catch(e => console.warn('[Bot] Pending broadcast gagal:', e.message));
+        }, 4000);
+      } else {
+        console.log('[PendingBroadcast] Replay on reconnect NONAKTIF. Gunakan dashboard atau PENDING_BROADCAST_AUTO=true.');
+      }
     }
     if (connection === "close") {
       if (closedHandled) return;
       closedHandled = true;
       _connecting = false;
+      // Batalkan timer pending broadcast agar koneksi baru nanti yang memicu, bukan koneksi lama ini.
+      if (_pendingBroadcastTimer) { clearTimeout(_pendingBroadcastTimer); _pendingBroadcastTimer = null; }
       setBroadcaster(null); // sock mati → jangan broadcast lewat koneksi basi; daftar ulang saat 'open'.
       setLaporgubNotifier(null);
       setAduanKontenNotifier(null);
