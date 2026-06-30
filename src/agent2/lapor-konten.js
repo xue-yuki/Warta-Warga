@@ -45,6 +45,18 @@ function isNegative(text) {
   return /\b(tidak|enggak|ga|gak|batal|nanti|jangan)\b/i.test(text || "");
 }
 
+function shouldReleasePendingForNewIntent(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  const hasNewIntent =
+    extractUrl(value) ||
+    /\b(bansos|pkh|bpnt|sembako|pip|kip|kis|blt|bantuan|cek\s*bansos|syarat|daftar|jadwal|saldo|pencairan)\b/i.test(value) ||
+    /\b(laporgub|lapor\s*gub|jalan|lampu|sampah|banjir|pdam|pln|listrik|air|rusak|aduan\s+layanan)\b/i.test(value) ||
+    /\b(status|perkembangan|progres|progress|lacak|cek)\b[\s\S]{0,80}\b(laporan|aduan|tiket|ticket|kode)\b/i.test(value);
+  if (hasNewIntent) return true;
+  return value.length > 28 && /\?\s*$/.test(value);
+}
+
 function cleanUrl(raw) {
   return String(raw || "")
     .trim()
@@ -584,6 +596,10 @@ async function consumeLaporKontenReply({
       return { reply: "Oke, laporan ke Aduan Konten tidak saya kirim." };
     }
     if (!isAffirmative(text)) {
+      if (shouldReleasePendingForNewIntent(text)) {
+        pendingKonten.delete(sessionId);
+        return null;
+      }
       return { reply: "Balas *Ya* untuk mengirim laporan ke aduankonten.id, atau *Tidak* untuk batal." };
     }
 

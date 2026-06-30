@@ -5,9 +5,9 @@ import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, Disconn
 import { config, hasSearch, hasVision } from "../config.js";
 import { getGrup, upsertGrup, countInfoByWilayah } from "../db/index.js";
 import { respondToMessage, GREETING } from "../agent2/handler.js";
-import { handleLaporKonten, hasPendingLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
+import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
-import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
+import { handleLaporLayanan, hasPendingLaporanLayanan, isPublicServiceReportIntent, storeImageForSession } from "../agent2/lapor-layanan.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
 import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
@@ -374,17 +374,15 @@ async function handleGroup(sock, jid, msg, text, botJid, send, imageText = null,
     return;
   }
 
-  // F2.2: di grup, hanya merespons saat di-mention. Pengecualian:
-  // balasan Ya/Tidak untuk pending AduanKonten dari pengirim yang sama.
-  const mentioned = isMentioned(msg, sock);
+  // F2.2: di grup, hanya merespons saat bot di-mention atau pesan user me-reply bot.
+  const addressed = isMentioned(msg, sock);
   const sender = userPart(msg.key.participant || msg.participant || jid);
   const sessionId = `${jid}:${sender}`;
-  const hasPendingAduanKonten = hasPendingLaporKonten(sessionId);
   if (process.env.WA_DEBUG) {
     const ctx = unwrap(msg.message)?.extendedTextMessage?.contextInfo;
-    console.log("[grup-debug] mention=%s pendingAduanKonten=%s | bot.id=%s bot.lid=%s | mentionedJid=%j", mentioned, hasPendingAduanKonten, sock?.user?.id, sock?.user?.lid, ctx?.mentionedJid || []);
+    console.log("[grup-debug] addressed=%s | bot.id=%s bot.lid=%s | mentionedJid=%j participant=%s", addressed, sock?.user?.id, sock?.user?.lid, ctx?.mentionedJid || [], ctx?.participant || "");
   }
-  if (!mentioned && !hasPendingAduanKonten) return;
+  if (!addressed) return;
 
   await markRead(sock, msg);
   await presence(sock, jid, "composing");
@@ -451,6 +449,19 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
     }
     await presence(sock, jid, "paused");
   };
+  const handleLayananWithTyping = async (payload) => {
+    await startAduanKontenTyping();
+    try {
+      const layananResult = await handleLaporLayanan(payload);
+      if (layananResult?.reply) {
+        await send(layananResult.reply);
+        return true;
+      }
+      return false;
+    } finally {
+      await stopAduanKontenTyping();
+    }
+  };
 
   // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
   // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
@@ -492,23 +503,20 @@ async function handleContent(sock, jid, { text, konteks, scopeTags, wilayahTag, 
     storeImageForSession(sessionId, { imageBuffer, imageMimetype, imageText });
   }
 
+  const layananMessage = [text, imageText].filter(Boolean).join("\n\n");
+  if (isPublicServiceReportIntent(layananMessage)) {
+    if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
+  }
+
   // Untuk gambar tanpa teks: tangkap dulu di lapor-layanan agar buffer tersimpan di pending state,
   // menunggu teks penjelasan dari warga. Pesan teks biasa langsung ke brain (tidak perlu keyword matching).
   if (imageBuffer && !text) {
-    const imageOnlyResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
-    if (imageOnlyResult?.reply) {
-      await send(imageOnlyResult.reply);
-      return;
-    }
+    if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
   }
 
   // Cek pending image state (warga sedang menunggu konfirmasi setelah kirim gambar)
   if (hasPendingLaporanLayanan(sessionId)) {
-    const pendingResult = await handleLaporLayanan({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId });
-    if (pendingResult?.reply) {
-      await send(pendingResult.reply);
-      return;
-    }
+    if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
   }
 
   const result = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });

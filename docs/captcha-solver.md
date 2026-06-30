@@ -9,22 +9,22 @@ Flow LaporGub memakai OCR untuk CAPTCHA gambar sederhana.
 Konfigurasi:
 
 ```env
-CAPTCHA_SOLVER_PROVIDER=auto
+CAPTCHA_SOLVER_API_KEY=
+CAPTCHA_SOLVER_BASE_URL=
+CAPTCHA_SOLVER_MODEL=
 VISION_API_KEY=
 VISION_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 VISION_MODEL=gemini-flash-lite-latest
-CAPTCHA_GEMINI_API_KEY=
-CAPTCHA_GEMINI_MODEL=
-CAPTCHA_OPENROUTER_API_KEY=
-CAPTCHA_OPENROUTER_MODEL=
-CAPTCHA_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 ```
 
-Provider:
+Urutan konfigurasi:
 
-- `auto`: coba Gemini lalu OpenRouter.
-- `gemini`: gunakan Gemini/OpenAI-compatible vision.
-- `openrouter`: gunakan OpenRouter vision.
+- Jika `CAPTCHA_SOLVER_API_KEY` diisi, solver memakai key khusus itu.
+- Jika tidak, solver memakai `VISION_API_KEY`.
+- Jika keduanya kosong, solver fallback ke `OPENROUTER_API_KEY`.
+- `CAPTCHA_SOLVER_BASE_URL` dan `CAPTCHA_SOLVER_MODEL` boleh dipakai untuk override khusus captcha tanpa mengubah LLM utama bot.
 
 Kode terkait:
 

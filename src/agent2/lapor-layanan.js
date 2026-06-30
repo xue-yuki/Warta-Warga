@@ -10,6 +10,9 @@ import { submitAduanKonten, ADUANKONTEN_CATEGORIES } from "../portal/aduankonten
 import { matchScamPattern } from "./lapor.js";
 
 const SERVICE_KEYWORDS = /\b(lapor|aduan|pengaduan|adukan|rusak|mati listrik|mati air|jalan rusak|jalan berlubang|sampah|pdam|pln|listrik|air|jalan|kebersihan|fasilitas umum|lampu jalan|banjir|konten|situs|website|web|hoaks|hoax|pornografi|judi|penipuan online|sara|terorisme|radikalisme)\b/i;
+const PUBLIC_SERVICE_SUBJECTS = /\b(jalan|sampah|pdam|pln|listrik|air|kebersihan|fasilitas umum|lampu jalan|trotoar|saluran|drainase|jembatan|penerangan)\b/i;
+const PUBLIC_SERVICE_PROBLEMS = /\b(rusak|berlubang|mati|padam|tidak\s+keluar|keruh|bocor|mampet|banjir|menumpuk|gelap|longsor|macet|patah|amblas|terputus|perlu\s+diperbaiki|tolong\s+diperbaiki)\b/i;
+const REPORT_INTENT = /\b(lapor|aduan|pengaduan|adukan|ngadu|tolong|mohon)\b/i;
 // Sinyal yang mengarah ke penipuan OFFLINE/sosial — biarkan brain.js yang menangani.
 // Kombinasikan juga dengan matchScamPattern dari lapor.js untuk coverage lebih luas.
 const FRAUD_KEYWORDS = /\b(transfer|otp|pulsa|rekening|kartu kredit|hadiah|ngaku petugas|modus|biaya pencairan)\b/i;
@@ -125,6 +128,15 @@ function isServiceReportIntent(text) {
   return true;
 }
 
+export function isPublicServiceReportIntent(text) {
+  if (!text) return false;
+  if (!PUBLIC_SERVICE_SUBJECTS.test(text)) return false;
+  if (!REPORT_INTENT.test(text) && !PUBLIC_SERVICE_PROBLEMS.test(text)) return false;
+  if (FRAUD_KEYWORDS.test(text)) return false;
+  if (matchScamPattern(text)) return false;
+  return true;
+}
+
 function isAffirmative(text) {
   return /\b(ya|oke|ok|iya|yes|betul|lanjut|kirim)\b/i.test(text);
 }
@@ -194,6 +206,38 @@ function cleanLokasiDetail(lokasi) {
     .trim();
 }
 
+function cleanLaporgubLocationQuery(value) {
+  return String(value || "")
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/^(kab(?:upaten)?\.?\s*|kota\s*|kec(?:amatan)?\.?\s*|kel(?:urahan)?\.?\s*|desa\s*)/i, "")
+    .replace(/\b(?:rusak|berlubang|mati|padam|banjir|tolong|mohon|perlu|diperbaiki|diperhatikan)\b[\s\S]*$/i, "")
+    .replace(/[.,;:!?()[\]{}]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferLaporgubLocationQuery(deskripsi, lokasiDetail, lokasiTag) {
+  const text = String(deskripsi || "");
+  const candidates = [];
+  const re = /\b(?:di|ke|menuju|arah|sekitar|dekat|antara)\s+([^.,\n]+)/gi;
+  let match;
+  while ((match = re.exec(text))) {
+    let segment = match[1] || "";
+    if (/\bke\b/i.test(segment)) segment = segment.split(/\bke\b/i).pop();
+    if (/\bdan\b/i.test(segment)) segment = segment.split(/\bdan\b/i).pop();
+    const cleaned = cleanLaporgubLocationQuery(segment);
+    if (cleaned && cleaned.length >= 3) candidates.push(cleaned);
+  }
+
+  const fromDescription = candidates.at(-1);
+  if (fromDescription) return fromDescription;
+
+  const explicit = cleanLaporgubLocationQuery(lokasiDetail);
+  if (explicit) return explicit;
+
+  return cleanLaporgubLocationQuery(humanWilayah(lokasiTag));
+}
+
 const ASK_SERVICE_DETAIL = 'Silakan ceritakan masalahnya ya. Contoh: "listrik mati di jalan Sudirman, Kota Semarang" atau "air PDAM tidak keluar sejak pagi".';
 const ASK_SERVICE_LOCATION = 'Untuk mengirim aduan, sebutkan dulu kabupaten/kota yang terkena. Misal: "Kab. Banyumas" atau "Kota Semarang".';
 const ASK_SERVICE_LOCATION_KONTEN = 'Untuk laporan konten internet, sebutkan URL/link situs yang ingin dilaporkan ya.';
@@ -255,7 +299,7 @@ export async function handleLaporLayanan({ text, imageText = null, imageBuffer =
 
   const message = [text, imageText].filter(Boolean).join("\n\n");
   const parsed = await parseLaporanLayanan(message);
-  const wilayahTag = normalizeLaporanLocation(parsed.lokasi);
+  const wilayahTag = normalizeLaporanLocation(detectWilayahFromText(message));
 
   if (!parsed.deskripsi || parsed.deskripsi.length < 20) {
     pendingLaporan.set(sessionId, {
@@ -373,7 +417,7 @@ async function consumeLaporLayananReply({ sessionId, text, imageText = null, ima
     const prev = pending.data;
     const message = [text, imageText, prev.deskripsi].filter(Boolean).join("\n\n");
     const parsed = await parseLaporanLayanan(message);
-    const lokasiTag = normalizeLaporanLocation(parsed.lokasi || prev.lokasiTag);
+    const lokasiTag = prev.lokasiTag || normalizeLaporanLocation(detectWilayahFromText(message));
     const data = {
       kategori: parsed.kategori || prev.kategori,
       deskripsi: parsed.deskripsi || prev.deskripsi,
@@ -558,9 +602,9 @@ async function _submitToLaporGub({ id, deskripsi, lokasiDetail, lokasiTag, lampi
     await insertLaporanLayananSubmitLog({ laporanId: id, portal: "laporgub", attempt: 1, status: "failed", errorMsg: "Deskripsi terlalu pendek" });
     return { reply: `⚠️ Deskripsi aduan terlalu pendek (${deskripsi?.trim().length || 0} karakter). LaporGub membutuhkan minimal 50 karakter. Silakan ceritakan masalahnya lebih detail ya — lokasi, kondisi, dan sudah berapa lama terjadi.` };
   }
-  // lokasiAduan: pakai lokasiDetail (nama bersih dari LLM, sudah di-strip prefix Kab./Kota),
-  // fallback ke humanWilayah hanya kalau lokasiDetail benar-benar kosong.
-  const lokasiAduan = lokasiDetail || humanWilayah(lokasiTag);
+  // LaporGub Select2 mencari Kota/Kecamatan/Kelurahan. Untuk aduan seperti
+  // "Mersi ke Sokaraja", pakai detail lokasi di deskripsi alih-alih hanya "Banyumas".
+  const lokasiAduan = inferLaporgubLocationQuery(deskripsi, lokasiDetail, lokasiTag);
   const result = await submitLaporGub({
     isiAduan: deskripsi,
     lokasiAduan,

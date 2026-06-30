@@ -5,20 +5,43 @@ export async function solveCaptchaImage(buffer, mimetype = "image/png") {
     throw new Error("Captcha image is empty");
   }
 
-  const baseUrl = (process.env.IMAGE_BASE_URL || process.env.LLM_BASE_URL || "").trim().replace(/\/+$/, "");
+  const hasVisionKey = Boolean((process.env.CAPTCHA_SOLVER_API_KEY || process.env.VISION_API_KEY || process.env.VISION_API || "").trim());
+  const baseUrl = (
+    process.env.CAPTCHA_SOLVER_BASE_URL ||
+    process.env.VISION_BASE_URL ||
+    process.env.LLM_BASE_URL ||
+    process.env.OPENROUTER_BASE_URL ||
+    (hasVisionKey ? config.vision.baseUrl : config.openrouter.baseUrl) ||
+    ""
+  ).trim().replace(/\/+$/, "");
   if (!baseUrl) {
-    throw new Error("VISION_BASE_URL or LLM_BASE_URL must be set in the environment");
+    throw new Error("CAPTCHA_SOLVER_BASE_URL, VISION_BASE_URL, or LLM_BASE_URL must be set in the environment");
   }
 
   const endpoint = baseUrl.includes("/chat/completions") ? baseUrl : `${baseUrl}/chat/completions`;
-  const apiKey = (process.env.IMAGE_API_KEY || process.env.LLM_API_KEY || config.vision.apiKey || "").trim();
+  const apiKey = (
+    process.env.CAPTCHA_SOLVER_API_KEY ||
+    process.env.VISION_API_KEY ||
+    process.env.VISION_API ||
+    process.env.LLM_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    config.vision.apiKey ||
+    config.openrouter.apiKey ||
+    ""
+  ).trim();
   if (!apiKey) {
-    throw new Error("VISION_API_KEY or LLM_API_KEY must be set in the environment");
+    throw new Error("CAPTCHA_SOLVER_API_KEY, VISION_API_KEY, LLM_API_KEY, or OPENROUTER_API_KEY must be set in the environment");
   }
 
-  const model = (process.env.CAPTCHA_SOLVER_MODEL || process.env.LLM_MODEL || "").trim();
+  let model = (process.env.CAPTCHA_SOLVER_MODEL || process.env.VISION_MODEL || process.env.LLM_MODEL || (hasVisionKey ? config.vision.model : config.openrouter.fastModel) || "").trim();
+  if (/openrouter\.ai/i.test(baseUrl) && /^gpt-/i.test(model)) {
+    model = `openai/${model}`;
+  }
+  if (/generativelanguage\.googleapis\.com/i.test(baseUrl) && /^(?:openai\/)?gpt-/i.test(model)) {
+    model = (process.env.VISION_MODEL || config.vision.model || "").trim();
+  }
   if (!model) {
-    throw new Error("VISION_MODEL or LLM_MODEL must be set in the environment");
+    throw new Error("CAPTCHA_SOLVER_MODEL, VISION_MODEL, or LLM_MODEL must be set in the environment");
   }
 
   const temperature = Number(process.env.VISION_TEMPERATURE ?? process.env.LLM_TEMPERATURE ?? "0");
