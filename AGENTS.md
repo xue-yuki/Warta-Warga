@@ -1,20 +1,17 @@
 <claude-mem-context>
 # Memory Context
 
-# [Warta-Warga] recent context, 2026-06-29 7:19pm GMT+7
+# [Warta-Warga] recent context, 2026-06-30 12:21am GMT+7
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (20,978t read) | 589,421t work | 96% savings
+Stats: 50 obs (20,894t read) | 598,413t work | 97% savings
 
-### Jun 27, 2026
-S49 Admin Verify/Dismiss Buttons Restricted to PENDING Reports Only — warta-warga-web (Jun 27 at 11:08 PM)
 ### Jun 28, 2026
 S50 Dedicated Banyumas Laporan Seeder Created — scripts/seed-banyumas.js (Jun 28 at 10:47 PM)
 S51 Broadcast Pipeline Fix Verified — TypeScript Clean, Imports Confirmed (Jun 28 at 11:40 PM)
-515 11:46p 🔵 Warta-Warga Bot Process (PID 14379) Not Listening on Any TCP Port
 516 11:47p 🔵 Warta-Warga Broadcast Deduplication via peringatan_terkirim Table
 517 11:48p 🔴 Added listLaporanApprovedPendingBroadcast() to Query Pending Broadcast Reports
 518 " 🔴 broadcastPendingPeringatan() Added — Fixes Dashboard-Approved Reports Never Being Broadcast
@@ -64,6 +61,7 @@ S60 Warta-Warga Ingest Scheduler Starts Automatically with Bot — index.js Inte
 S61 Warta-Warga — Wire ingest scheduler to start with index.js, fix pdf-parse API compatibility in komdigi.js (Jun 29 at 7:09 PM)
 562 7:12p 🔴 ingest.js CLI Auto-Execution Bug Fixed — ESM Module Guard Added
 563 " ✅ Warta-Warga Session Summary — Ingest Scheduler Startup Integration
+S62 Komdigi Hoaks PDF Successfully Downloaded and Parsed via pdf-parse (Jun 29 at 7:12 PM)
 564 7:15p 🔴 pdf-parse v2.4.5 API Breaking Change Fixed in komdigi.js
 565 7:16p 🔵 pdf-parse@2.4.5 Breaking API Change — Default Function Export Removed
 566 " 🟣 Ingest Scheduler Integrated into index.js Startup — Warta-Warga
@@ -71,7 +69,8 @@ S61 Warta-Warga — Wire ingest scheduler to start with index.js, fix pdf-parse 
 568 " 🔵 Komdigi Hoaks PDF — Today's File Returns Null, Yesterday's Resolves Successfully
 569 7:18p 🔵 Komdigi Hoaks PDF Successfully Downloaded and Parsed via pdf-parse
 570 " 🔵 komdigi.js and check-komdigi.js Are New Untracked Files — Not Yet Committed
-S62 Komdigi Hoaks PDF Successfully Downloaded and Parsed via pdf-parse (Jun 29 at 7:18 PM)
+571 7:20p 🟣 Ingest Scheduler Integrated into Warta-Warga index.js Startup
+S63 Ingest Scheduler Integrated into Warta-Warga index.js Startup (Jun 29 at 7:20 PM)
 
-Access 589k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 598k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
