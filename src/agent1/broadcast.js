@@ -108,12 +108,31 @@ function targetGrups(rec) {
 async function sendToGrups(targets, text, imagePath = null) {
   let okGrup = 0;
   for (let i = 0; i < targets.length; i++) {
-    try {
-      await _sender(targets[i].id_grup, text, imagePath);
-      okGrup++;
-    } catch (e) {
-      console.warn(`[Broadcast] gagal kirim ke ${targets[i].id_grup}: ${e?.message}`);
+    const g = targets[i];
+    let sent = false;
+    if (imagePath) {
+      try {
+        await _sender(g.id_grup, text, imagePath);
+        sent = true;
+      } catch (imgErr) {
+        // Gambar gagal → fallback teks saja agar pesan tetap terkirim
+        console.warn(`[Broadcast] gambar gagal ke ${g.id_grup} (${imgErr?.message}), coba teks saja…`);
+        try {
+          await _sender(g.id_grup, text, null);
+          sent = true;
+        } catch (e) {
+          console.warn(`[Broadcast] gagal kirim ke ${g.id_grup}: ${e?.message}`);
+        }
+      }
+    } else {
+      try {
+        await _sender(g.id_grup, text, null);
+        sent = true;
+      } catch (e) {
+        console.warn(`[Broadcast] gagal kirim ke ${g.id_grup}: ${e?.message}`);
+      }
     }
+    if (sent) okGrup++;
     if (i < targets.length - 1) await delay(randomGap());
   }
   return okGrup;
@@ -320,8 +339,10 @@ export async function broadcastPeringatan(laporan, { imagePath = null } = {}) {
     if (okGrup > 0) {
       await markPeringatanTerkirim({ laporanId: laporan.id, wilayahTag: laporan.wilayah_tag, grupCount: okGrup });
       console.log(`[Peringatan] ⚠️ laporan #${laporan.id} (${laporan.wilayah_tag}) → ${okGrup} grup${resolvedImage ? ' + poster' : ''}.`);
+    } else {
+      console.warn(`[Peringatan] laporan #${laporan.id} (${laporan.wilayah_tag}) → 0/${targets.length} grup berhasil (semua gagal kirim).`);
     }
-    return { sent: okGrup, grupCount: okGrup };
+    return { sent: okGrup, grupCount: okGrup, ...(okGrup === 0 && targets.length > 0 ? { reason: 'kirim-gagal' } : {}) };
   } finally {
     if (key) _peringatanInFlight.delete(key);
   }

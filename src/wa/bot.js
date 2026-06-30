@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import pino from "pino";
 import qrcode from "qrcode-terminal";
@@ -218,11 +219,12 @@ export async function startBot() {
       console.log(`✅ Terhubung sebagai ${me}`);
       // Daftarkan pengirim broadcast agar Agent 1 bisa menyebar info baru ke grup.
       setBroadcaster(async (jid, text, imagePath = null) => {
-              if (imagePath) {
-                return sock.sendMessage(jid, { image: { url: imagePath }, caption: text });
-              }
-              return sock.sendMessage(jid, { text });
-            });      
+        if (imagePath) {
+          const imageBuffer = fs.readFileSync(imagePath);
+          return sock.sendMessage(jid, { image: imageBuffer, caption: text });
+        }
+        return sock.sendMessage(jid, { text });
+      });      
       
             // Daftarkan pengirim notifikasi LaporGub agar follow-up bisa dikirim ke pelapor.
       setLaporgubNotifier((jid, text) => sock.sendMessage(jid, { text }));

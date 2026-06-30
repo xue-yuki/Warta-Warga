@@ -213,10 +213,13 @@ export async function ingestKomdigiHoaks({ date } = {}) {
   for (const d of [today, yesterday]) {
     const label = formatKomdigiDate(d);
     try {
-      const url = await resolveKomdigiPdfUrl(d);
+      // Coba listing terlebih dahulu; jika tidak ada, coba URL langsung
+      // (listing sering terlambat diperbarui meski file sudah tersedia).
+      let url = await resolveKomdigiPdfUrl(d);
       if (!url) {
-        console.log(`[Komdigi] PDF ${label} belum ada di listing.`);
-        continue;
+        const directUrl = buildPdfUrl(d);
+        console.log(`[Komdigi] PDF ${label} belum ada di listing, mencoba URL langsung…`);
+        url = directUrl;
       }
 
       const res = await axios.get(url, {
@@ -233,7 +236,7 @@ export async function ingestKomdigiHoaks({ date } = {}) {
         break;
       }
       if (res.status === 404) {
-        console.log(`[Komdigi] PDF ${url} belum ada (404).`);
+        console.log(`[Komdigi] PDF ${label} belum ada (404) — coba hari sebelumnya.`);
         continue;
       }
       const contentType = res.headers?.['content-type'] || '-';
