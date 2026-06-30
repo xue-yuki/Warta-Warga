@@ -216,7 +216,7 @@ export async function checkAduanKontenReport(laporan) {
   }
 
   const ticket = String(laporan.nomor_ticket).trim();
-  const parsed = await fetchAduanKontenStatus(ticket, { headless: false });
+  const parsed = await fetchAduanKontenStatus(ticket, { headless: true });
   const items = meaningfulItems(parsed);
   if (!items.length && !parsed.statusText && !parsed.text) {
     return { id: laporan.id, status: "skip_no_status", ticket };
@@ -294,7 +294,7 @@ export async function runAduanKontenCheckerOnce() {
 
 export async function runAduanKontenCheckerForTicket(ticket) {
   console.log(`[aduankonten-checker] debug run untuk ticket=${ticket}`);
-  const parsed = await fetchAduanKontenStatus(ticket, { headless: false });
+  const parsed = await fetchAduanKontenStatus(ticket, { headless: true });
   const items = meaningfulItems(parsed);
   console.log(`[aduankonten-checker] parsed items count=${items.length}`);
   console.log("[aduankonten-checker] statusText=", parsed.statusText || "-");

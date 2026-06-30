@@ -9,7 +9,8 @@ Fitur AduanKonten membantu warga mengirim laporan konten negatif dari WhatsApp t
 Komponen utama:
 
 - `src/agent2/lapor-konten.js`: intent, parsing URL/kategori/alasan, konfirmasi user, dan pencatatan DB.
-- `src/portal/aduankonten.js`: otomasi browser AduanKonten memakai Patchright.
+- `src/portal/aduankonten.js`: wrapper Node untuk otomasi AduanKonten.
+- `scripts/aduankonten_seleniumbase.py`: driver browser SeleniumBase UC mode untuk Cloudflare/search/submit/status.
 - `src/agent2/aduankonten-checker.js`: polling status tiket dan notifikasi WhatsApp.
 - `src/agent2/layanan-checker.js`: scheduler layanan Agent 2 untuk LaporGub dan AduanKonten.
 - `scripts/demo-aduankonten.js`: dry-run, probe, dan live submit manual.
@@ -19,12 +20,12 @@ Komponen utama:
 
 Jalur AduanKonten memakai:
 
-- `patchright` untuk browser automation.
-- `ghost-cursor` untuk interaksi form yang lebih natural.
+- `seleniumbase` UC mode untuk browser automation dan challenge Cloudflare best-effort.
+- Python driver `scripts/aduankonten_seleniumbase.py`.
 - Persistent profile `ADUANKONTEN_USER_DATA_DIR`.
 - Storage state `ADUANKONTEN_SESSION_PATH`.
 
-`playwright-core` masih ada di project untuk modul lain seperti LaporGub/BrightData, tetapi portal AduanKonten memakai Patchright.
+`playwright-core` masih ada di project untuk modul lain seperti LaporGub/BrightData, tetapi portal AduanKonten memakai SeleniumBase.
 
 ## Konfigurasi
 
@@ -34,22 +35,18 @@ ADUANKONTEN_SESSION_PATH=./.aduankonten_session.json
 ADUANKONTEN_USER_DATA_DIR=./.aduankonten_profile
 ADUANKONTEN_DEBUG_DIR=
 ADUANKONTEN_USER_AGENT=
-ADUANKONTEN_BROWSER_CHANNEL=
+ADUANKONTEN_PYTHON=python
+ADUANKONTEN_SELENIUMBASE_SCRIPT=./scripts/aduankonten_seleniumbase.py
 ADUANKONTEN_CHECK_INTERVAL_HOURS=6
-
-CLOUDFLARE_CAPTCHA_SOLVER=true
-CLOUDFLARE_CAPTCHA_PROVIDER=openrouter
-CLOUDFLARE_OPENROUTER_API_KEY=
-CLOUDFLARE_OPENROUTER_MODEL=google/gemini-flash-1.5
-CLOUDFLARE_CAPTCHA_MAX_RETRIES=3
-CLOUDFLARE_CAPTCHA_TIMEOUT_MS=60000
 ```
 
 Catatan:
 
-- `ADUANKONTEN_BROWSER_CHANNEL=chrome` dapat dipakai jika Patchright tidak menemukan browser default.
+- Jalankan `npm run setup:aduankonten` sekali untuk memasang dependency Python.
+- Command setup tersebut membaca `requirements.txt` dan memasang `seleniumbase`.
+- `ADUANKONTEN_PYTHON` dapat diisi `python`, `py -3`, atau path Python yang punya SeleniumBase.
 - `ADUANKONTEN_USER_AGENT` dikosongkan secara default. Isi hanya jika perlu menyamakan environment browser tertentu.
-- `CLOUDFLARE_CAPTCHA_SOLVER` adalah handler best-effort untuk mode headless. Jika Cloudflare tetap memberi challenge berulang, gunakan warmup/headed.
+- SeleniumBase UC mode menangani Cloudflare secara best-effort. Jika Cloudflare tetap memberi challenge berulang, gunakan warmup/headed untuk debugging manual.
 
 ## Flow Submit
 
@@ -68,7 +65,7 @@ Catatan:
 7. Search URL di halaman utama:
    - isi `#search_url`
    - klik `#btn-search-submit`
-   - baca `POST /livewire/update`
+   - tunggu outcome halaman `submit_form` atau duplicate
 8. Jika duplicate, ambil link dukungan `/auth/redirect/<id>` dan return duplicate.
 9. Jika bisa submit, buka `/submission/submit-form`.
 10. Isi form:
@@ -104,20 +101,39 @@ Kode tidak boleh menganggap sukses hanya karena tombol submit berhasil diklik. S
 
 ## Headless dan Headed
 
-Headless dipakai untuk flow otomatis. Namun `aduankonten.id` dapat memberi Cloudflare challenge berulang pada mode headless walaupun `cf_clearance` sudah ada.
+Flow AduanKonten dari WhatsApp memakai SeleniumBase mode headless. Mode headed tetap tersedia di script CLI untuk warmup/debugging manual ketika Cloudflare memberi challenge berulang.
 
 Alur yang disarankan:
 
-1. Jalankan warmup/probe headless.
-2. Jika form search muncul, lanjut probe atau submit.
-3. Jika Cloudflare challenge berulang, jalankan warmup headed:
+1. Jalankan setup Python:
+
+```bash
+npm run setup:aduankonten
+```
+
+Validasi SeleniumBase tersedia:
+
+```bash
+python -c "import seleniumbase; print(seleniumbase.__version__)"
+```
+
+2. Jalankan warmup headless:
+
+```bash
+npm run warmup:aduankonten -- --headless --debug --wait-ms=300000
+```
+
+3. Jika Cloudflare masih berulang, jalankan warmup headed untuk debugging manual:
 
 ```bash
 npm run warmup:aduankonten -- --debug --wait-ms=300000
 ```
 
-4. Setelah session tersimpan, coba ulang probe/submit.
-5. Jika headless tetap re-challenge, gunakan `--headed` untuk submit produksi.
+4. Setelah session tersimpan, coba probe/submit. Bot WhatsApp tetap memanggil AduanKonten dengan `headless: true`.
+
+```bash
+npm run demo:aduankonten -- --probe --url=https://example.com --category=perjudian --debug --challenge-wait-ms=300000
+```
 
 ## Kategori
 
@@ -151,12 +167,11 @@ Tanpa LLM, kategori ditentukan dengan heuristik keyword. Jika LLM aktif, hasilny
 
 Checker membuka form lacak AduanKonten, submit kode laporan, parse status yang tersedia, lalu mengirim notifikasi WhatsApp jika fingerprint status berubah.
 
-Saat bot WhatsApp baru connect, scheduler hanya didaftarkan. AduanKonten tidak langsung dibuka kecuali `ADUANKONTEN_CHECK_ON_BOOT=true`. Default ini sengaja dipakai karena flow status berjalan headed dan bisa memunculkan browser/Cloudflare ketika proses baru start.
+Saat bot WhatsApp baru connect, scheduler hanya didaftarkan. AduanKonten tidak langsung dibuka kecuali `ADUANKONTEN_CHECK_ON_BOOT=true`. Default ini sengaja dipakai agar proses baru start tidak langsung memicu Cloudflare/status check.
 
 ## Batasan
 
 - `--submit` mengirim laporan produksi resmi. Jangan gunakan dengan URL dummy.
-- Cloudflare/reCAPTCHA bisa membuat headless gagal walaupun solver melaporkan cookie sudah ada.
+- Cloudflare/reCAPTCHA bisa membuat headless gagal walaupun session browser sudah ada.
 - `--debug` menyimpan HTML dan screenshot ke `debug/aduankonten/`.
-- Jika field alasan terseleksi biru atau tidak terisi, pastikan flow memakai helper target-scoped `humanFill()` terbaru.
-- Jika submit tidak sukses, cek log `response submit`. Sukses normal adalah `HTTP 302 -> /page/success`.
+- Jika submit tidak sukses, cek HTML/screenshot debug. Sukses normal tetap halaman `/page/success` dengan kode laporan.
