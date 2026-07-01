@@ -1,11 +1,18 @@
-import "dotenv/config";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(__dirname, "..");
 
 const abs = (p) => (path.isAbsolute(p) ? p : path.resolve(ROOT, p));
+
+for (const envPath of [path.resolve(ROOT, ".env"), path.resolve(ROOT, "..", "web-warta-warga", "warta-warga-web", ".env"), path.resolve(ROOT, "..", "warta-warga-web", ".env")]) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+  }
+}
 
 export const config = {
   // LLM (OpenAI-compatible). Default OpenRouter; bisa diarahkan ke DeepSeek langsung
@@ -120,15 +127,15 @@ export const config = {
   },
 
   images: {
-    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || '',
-    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    model: process.env.IMAGE_MODEL || 'gpt-image-2',
+    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || "",
+    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+    model: process.env.IMAGE_MODEL || "gpt-image-2",
   },
 
   images: {
-    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || '',
-    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    model: process.env.IMAGE_MODEL || 'gpt-image-2',
+    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || "",
+    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+    model: process.env.IMAGE_MODEL || "gpt-image-2",
   },
 
   wa: {

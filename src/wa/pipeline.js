@@ -17,7 +17,7 @@ import { getGrup, upsertGrup, isAiEnabled, countInfoByWilayah } from "../db/inde
 import { respondToMessage, GREETING } from "../agent2/handler.js";
 import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
-import { handleLaporLayanan, hasPendingLaporanLayanan, isPublicServiceReportIntent, storeImageForSession } from "../agent2/lapor-layanan.js";
+import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
 import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah } from "../util/wilayah.js";
 import { scrapeRegion } from "../agent1/scheduler.js";
 import { config, hasSearch } from "../config.js";
@@ -237,11 +237,6 @@ export async function handleContent(adapter, jid, { text, konteks, scopeTags, wi
   // Simpan gambar ke image store agar bisa dipakai saat submit aduan layanan via LLM tool
   if (imageBuffer && sessionId) {
     storeImageForSession(sessionId, { imageBuffer, imageMimetype, imageText });
-  }
-
-  const layananMessage = [text, imageText].filter(Boolean).join("\n\n");
-  if (isPublicServiceReportIntent(layananMessage)) {
-    if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
   }
 
   // Untuk gambar tanpa teks: tangkap dulu di lapor-layanan agar buffer tersimpan di pending state,

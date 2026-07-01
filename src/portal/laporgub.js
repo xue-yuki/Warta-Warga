@@ -241,8 +241,38 @@ export async function submitLaporGub({ isiAduan, lokasiAduan, jenisAduan = "Publ
     const search = page.locator(".select2-search__field, input.select2-search__field");
     await search.waitFor({ state: "visible", timeout: 15000 });
     await search.fill(lokasiAduan);
-    await page.waitForSelector(".select2-results__option:not(.select2-results__option--disabled)", { timeout: 15000 });
+    // Tunggu AJAX Select2 selesai membawa hasil
+    await page.waitForTimeout(800);
+    const resultsSelector = ".select2-results__option:not(.select2-results__option--disabled):not(.select2-results__option--loading)";
+    try {
+      await page.waitForSelector(resultsSelector, { timeout: 10000 });
+    } catch {
+      // Tidak ada hasil — coba ulang dengan query yang lebih pendek (ambil kata pertama)
+      const fallbackQuery = lokasiAduan.split(/[\s,]+/)[0];
+      if (fallbackQuery && fallbackQuery !== lokasiAduan) {
+        await search.fill("");
+        await page.waitForTimeout(300);
+        await search.fill(fallbackQuery);
+        await page.waitForTimeout(800);
+        await page.waitForSelector(resultsSelector, { timeout: 10000 });
+      }
+    }
+    // Log semua opsi yang tersedia untuk debugging
+    const availableOptions = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll(".select2-results__option")).slice(0, 5).map(el => el.textContent?.trim());
+    });
+    console.log(`[laporgub] Select2 options untuk "${lokasiAduan}":`, availableOptions);
     await page.locator(".select2-results__option").first().click();
+    // Verifikasi lokasi benar-benar ter-set (bukan kosong)
+    await page.waitForTimeout(300);
+    const lokasiSelected = await page.evaluate(() => {
+      const el = document.querySelector(".select2-selection__rendered, [aria-labelledby*=lokasi] .select2-selection__rendered");
+      return el ? el.textContent?.trim() : null;
+    });
+    console.log(`[laporgub] lokasi selected: "${lokasiSelected}" dari query "${lokasiAduan}"`);
+    if (!lokasiSelected || lokasiSelected.toLowerCase().includes("pilih")) {
+      throw new Error(`Lokasi tidak ditemukan di dropdown LaporGub. Query pencarian: "${lokasiAduan}". Lokasi yang dimasukkan harus berupa nama kecamatan atau kelurahan yang dikenali LaporGub, bukan nama kabupaten atau deskripsi umum.`);
+    }
 
     const jenisValue = jenisAduan.toLowerCase() === "public" ? "1" : "0";
     await page.selectOption("#jenis", jenisValue);

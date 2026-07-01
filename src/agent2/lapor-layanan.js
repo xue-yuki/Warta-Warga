@@ -219,19 +219,32 @@ function cleanLaporgubLocationQuery(value) {
 function inferLaporgubLocationQuery(deskripsi, lokasiDetail, lokasiTag) {
   const text = String(deskripsi || "");
   const candidates = [];
-  const re = /\b(?:di|ke|menuju|arah|sekitar|dekat|antara)\s+([^.,\n]+)/gi;
+
+  // Hanya ambil segmen yang terlihat seperti nama lokasi geografis (bukan objek umum)
+  // Indikator lokasi: mengandung kata jalan, desa, kelurahan, kecamatan, gang, RT, RW, perumahan
+  // atau diikuti nama proper (huruf kapital)
+  const re = /\b(?:di|ke|menuju|arah|sekitar|dekat|antara)\s+([^.,\n]{3,60})/gi;
   let match;
   while ((match = re.exec(text))) {
     let segment = match[1] || "";
+    // Potong di kata penghubung
     if (/\bke\b/i.test(segment)) segment = segment.split(/\bke\b/i).pop();
     if (/\bdan\b/i.test(segment)) segment = segment.split(/\bdan\b/i).pop();
     const cleaned = cleanLaporgubLocationQuery(segment);
-    if (cleaned && cleaned.length >= 3) candidates.push(cleaned);
+    if (!cleaned || cleaned.length < 3) continue;
+
+    // Filter: harus terlihat seperti nama lokasi, bukan deskripsi kejadian
+    const looksLikeLocation =
+      /\b(jalan|jl\.?|gang|gg\.?|desa|dusun|kelurahan|kel\.?|kecamatan|kec\.?|perumahan|komplek|rt|rw|blok)\b/i.test(cleaned) ||
+      /^[A-Z]/.test(cleaned); // nama proper biasanya huruf kapital
+
+    if (looksLikeLocation) candidates.push(cleaned);
   }
 
   const fromDescription = candidates.at(-1);
   if (fromDescription) return fromDescription;
 
+  // Fallback: pakai lokasiDetail (nama kabupaten/kota sudah di-strip prefix)
   const explicit = cleanLaporgubLocationQuery(lokasiDetail);
   if (explicit) return explicit;
 

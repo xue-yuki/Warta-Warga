@@ -54,8 +54,16 @@ function renderMenuReply(menu, wilayahTag) {
   return menu.reply({ wilayahLabel });
 }
 
+// Sinyal layanan publik fisik — kalau ada ini, biarkan brain.js yang handle (bukan pipeline penipuan)
+const PUBLIC_SERVICE_BYPASS = /\b(jalan|listrik|pln|air|pdam|sampah|lampu|drainase|banjir|trotoar|saluran|fasilitas umum|layanan publik|infrastruktur|rusak|berlubang|mati|padam|bocor|mampet)\b/i;
+
 function isExplicitLaporIntent(text) {
-  return /\b(lapor|laporan|laporkan|laporin|melaporkan|ngelapor|ngelaporin|ngadu|aduan)\b/i.test(String(text || ''));
+  const t = String(text || '');
+  if (!(/\b(lapor|laporan|laporkan|laporin|melaporkan|ngelapor|ngelaporin|ngadu|aduan)\b/i.test(t))) return false;
+  // Kalau pesannya tentang layanan publik/infrastruktur, biarkan brain.js yang tangani
+  // supaya LLM bisa pakai tool kirim_aduan_layanan, bukan pipeline penipuan
+  if (PUBLIC_SERVICE_BYPASS.test(t)) return false;
+  return true;
 }
 
 // Ringkasan respons bot untuk analytics (bot bicara PII-free) — buang baris meta & potong.
