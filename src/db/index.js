@@ -808,6 +808,41 @@ export async function markPeringatanTerkirim({ laporanId, wilayahTag, grupCount 
     .run(laporanId, wilayahTag || null, grupCount ?? 0, ts);
 }
 
+// ---------- bot_settings ----------
+
+export async function getSetting(key, defaultValue = null) {
+  await initDb();
+  if (hasSupabase()) {
+    const r = await _pg`SELECT value FROM bot_settings WHERE key = ${key}`;
+    return r[0] ? r[0].value : defaultValue;
+  }
+  const row = sq().prepare('SELECT value FROM bot_settings WHERE key = ?').get(key);
+  return row ? row.value : defaultValue;
+}
+
+export async function setSetting(key, value) {
+  await initDb();
+  const now = new Date().toISOString();
+  if (hasSupabase()) {
+    await _pg`
+      INSERT INTO bot_settings (key, value, updated_ts) VALUES (${key}, ${value}, ${now})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_ts = EXCLUDED.updated_ts`;
+    return;
+  }
+  sq()
+    .prepare(
+      `INSERT INTO bot_settings (key, value, updated_ts) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_ts = excluded.updated_ts`,
+    )
+    .run(key, value, now);
+}
+
+/** Saklar utama tombol dashboard: AI mati → pipeline percakapan (agent2) tidak dipanggil sama sekali. */
+export async function isAiEnabled() {
+  const v = await getSetting('ai_enabled', 'true');
+  return v !== 'false';
+}
+
 // ---------- log_interaksi ----------
 
 export async function logInteraksi({ konteks, jenis, aksi = null, label, wilayahTag, ringkasPesan = null, ringkasResp = null }) {

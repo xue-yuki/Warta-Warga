@@ -1,7 +1,43 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import OpenAI from 'openai';
+import sharp from 'sharp';
 import { config, ROOT } from '../config.js';
+
+const LOGO_PATH = path.join(ROOT, 'logo.png');
+
+/**
+ * Tempel logo Warta Warga (watermark) di pojok kanan bawah poster hasil generate AI — supaya
+ * semua poster yang disebar ke grup WhatsApp konsisten menunjukkan sumbernya, tanpa bergantung
+ * pada model gambar untuk "menggambar ulang" logo (yang hasilnya sering meleset).
+ * @param {Buffer} imageBuffer PNG hasil generate dari model gambar.
+ * @returns {Promise<Buffer>} PNG dengan logo sudah ditempel, atau buffer asli kalau gagal.
+ */
+async function withLogoWatermark(imageBuffer) {
+  if (!fs.existsSync(LOGO_PATH)) return imageBuffer;
+  try {
+    const base = sharp(imageBuffer);
+    const { width = 1024, height = 1024 } = await base.metadata();
+    const logoWidth = Math.round(Math.min(width, height) * 0.14);
+    const logo = await sharp(LOGO_PATH).resize({ width: logoWidth }).toBuffer();
+    const logoMeta = await sharp(logo).metadata();
+    const margin = Math.round(Math.min(width, height) * 0.03);
+
+    return await base
+      .composite([
+        {
+          input: logo,
+          left: width - logoMeta.width - margin,
+          top: height - (logoMeta.height || logoWidth) - margin,
+        },
+      ])
+      .png()
+      .toBuffer();
+  } catch (err) {
+    console.warn('[ImageGen] ⚠️ Gagal tempel logo watermark:', err.message);
+    return imageBuffer;
+  }
+}
 
 /**
  * Generate a visual prompt optimized for ChatGPT image model based on bansos information.
@@ -99,7 +135,8 @@ Visual style:
     const dirPath = path.join(ROOT, 'data', 'posters');
     fs.mkdirSync(dirPath, { recursive: true });
     const filePath = path.join(dirPath, `${assetId}.png`);
-    fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+    const finalImage = await withLogoWatermark(Buffer.from(b64, 'base64'));
+    fs.writeFileSync(filePath, finalImage);
     console.log(`[ImageGen] ✅ Saved peringatan poster: ${filePath}`);
     return filePath;
   } catch (err) {
@@ -157,8 +194,8 @@ export async function generateAndSavePoster(record, { imageId } = {}) {
 
     const fileName = `${assetId}.png`;
     const filePath = path.join(dirPath, fileName);
-    
-    const buffer = Buffer.from(b64, 'base64');
+
+    const buffer = await withLogoWatermark(Buffer.from(b64, 'base64'));
     fs.writeFileSync(filePath, buffer);
     fs.writeFileSync(
       path.join(dirPath, `${assetId}.json`),

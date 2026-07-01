@@ -12,6 +12,10 @@ import { broadcastPendingPeringatan, broadcastPeringatan, formatPeringatan, hasB
 import { generatePeringatanPoster } from '../llm/imageGen.js';
 import { humanWilayah } from '../util/wilayah.js';
 import { humanModus } from '../agent2/lapor.js';
+import { config } from '../config.js';
+import { getBaileysStatus } from '../wa/status.js';
+import { kirimiDeviceStatus } from '../wa/kirimiClient.js';
+import { relinkBaileys, stopBaileys, startBaileys } from '../wa/bot.js';
 
 const TREN_DAYS = 30;
 const trenItems = async () => (await trendingModus({ days: TREN_DAYS, limit: 5 })).map((r) => ({ label: humanModus(r.modus_key), total: r.total }));
@@ -126,6 +130,51 @@ export function createDashboardApp() {
   app.use(express.json());
 
   app.get('/', async (req, res) => res.send(await halaman({ flash: req.query.flash })));
+
+  // Status koneksi WA — dipanggil oleh dashboard web (warta-warga-web) supaya admin bisa
+  // scan QR & lihat status koneksi dari browser, bukan dari terminal CLI (baileys), atau
+  // sekadar melihat status device kirimi.id (kirimi tidak butuh QR di sisi kita).
+  app.get('/wa/status', async (req, res) => {
+    if (config.waTransport === 'baileys') {
+      return res.json({ transport: 'baileys', ...getBaileysStatus() });
+    }
+    try {
+      const data = await kirimiDeviceStatus();
+      return res.json({ transport: 'kirimi', ...data });
+    } catch (e) {
+      return res.json({ transport: 'kirimi', success: false, error: e.message });
+    }
+  });
+
+  // Paksa QR baru (hapus auth_state + reconnect) — hanya berlaku untuk transport Baileys.
+  // Untuk kirimi.id, pairing dilakukan di dashboard kirimi.id sendiri, bukan di sini.
+  app.post('/wa/relink', async (req, res) => {
+    if (config.waTransport !== 'baileys') {
+      return res.status(400).json({ ok: false, error: 'Hubungkan ulang hanya berlaku untuk WA_TRANSPORT=baileys. Transport aktif saat ini: kirimi.' });
+    }
+    relinkBaileys().catch((e) => console.warn('[dashboard] relinkBaileys gagal:', e.message));
+    return res.json({ ok: true });
+  });
+
+  // Matikan koneksi WhatsApp dari dashboard tanpa hapus sesi tersimpan (beda dgn /wa/relink yang
+  // minta QR baru). Bot berhenti membalas/mem-broadcast sampai dinyalakan lagi lewat /wa/start.
+  app.post('/wa/stop', async (req, res) => {
+    if (config.waTransport !== 'baileys') {
+      return res.status(400).json({ ok: false, error: 'Matikan/nyalakan bot hanya berlaku untuk WA_TRANSPORT=baileys. Transport aktif saat ini: kirimi.' });
+    }
+    await stopBaileys();
+    return res.json({ ok: true });
+  });
+
+  // Nyalakan lagi koneksi yang dimatikan lewat /wa/stop. Pakai sesi tersimpan kalau masih valid,
+  // kalau tidak Baileys akan otomatis terbitkan QR baru (muncul di GET /wa/status).
+  app.post('/wa/start', async (req, res) => {
+    if (config.waTransport !== 'baileys') {
+      return res.status(400).json({ ok: false, error: 'Matikan/nyalakan bot hanya berlaku untuk WA_TRANSPORT=baileys. Transport aktif saat ini: kirimi.' });
+    }
+    startBaileys().catch((e) => console.warn('[dashboard] startBaileys gagal:', e.message));
+    return res.json({ ok: true });
+  });
 
   async function approveAndBroadcast(req, res) {
     const id = Number(req.params.id);

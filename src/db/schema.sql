@@ -130,6 +130,14 @@ CREATE TABLE IF NOT EXISTS laporan_layanan_submit_log (
   timestamp   TEXT NOT NULL
 );
 
+-- Pengaturan bot key-value, dibaca/ditulis bersama oleh backend bot & dashboard web
+-- (mis. 'ai_enabled' → tombol on/off AI di dashboard).
+CREATE TABLE IF NOT EXISTS bot_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_ts TEXT
+);
+
 -- Log interaksi ANONIM — hanya untuk tren kebutuhan, tanpa identitas pribadi
 CREATE TABLE IF NOT EXISTS log_interaksi (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
