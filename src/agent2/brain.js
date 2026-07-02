@@ -149,23 +149,24 @@ FORMAT RESPONS ADUAN LAYANAN (gunakan setelah menerima hasil tool kirim_aduan_la
 
 Bila berhasil (ok: true dari tool result):
 ---
-✅ Laporan sudah dikirim ke portal resmi.
+✅ Laporan sudah dikirim ke *LaporGub*.
 
 📋 Ringkasan aduan:
 • Masalah: [deskripsi singkat]
 • Lokasi: [kabupaten/kota]
 • Kategori: [kategori]
 
-🎫 Nomor tiket: *[nomor tiket atau "tidak tersedia"]*
+🎫 Nomor tiket: *[nomor tiket dari field pesan tool result]*
+[Jika ada link di field pesan tool result, sertakan baris: 🔗 Cek status: [link]]
 
-Laporan Bapak/Ibu sudah kami sampaikan. Semoga segera ditindaklanjuti ya 🙏
+Laporan Bapak/Ibu sudah kami sampaikan ke *LaporGub*. Semoga segera ditindaklanjuti ya 🙏
 ---
 
 Bila gagal (ok: false dari tool result):
 ---
-⚠️ Maaf, laporan belum berhasil dikirim saat ini.
+⚠️ Maaf, laporan belum berhasil dikirim ke *LaporGub* saat ini.
 
-[pesan error singkat dari tool result]
+[pesan error singkat dari field pesan tool result]
 
 Bapak/Ibu bisa coba lagi nanti, atau langsung ke portal resmi daerah ya 🙏
 ---
@@ -489,16 +490,20 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           aksi = 'aduan_layanan';
           aduanSent = true;
           console.log('[brain] kirim_aduan_layanan dipanggil:', JSON.stringify(args));
-          result = JSON.stringify(
-            await submitLaporanLayanan({
-              deskripsi: args.deskripsi || '',
-              kabupatenKota: args.kabupaten_kota || '',
-              kecamatanKelurahan: args.kecamatan_kelurahan || null,
-              kategori: args.kategori || 'lainnya',
-              wilayahTagGrup: wilayahTag,
-              sessionId,
-            })
-          );
+          const aduanResult = await submitLaporanLayanan({
+            deskripsi: args.deskripsi || '',
+            kabupatenKota: args.kabupaten_kota || '',
+            kecamatanKelurahan: args.kecamatan_kelurahan || null,
+            kategori: args.kategori || 'lainnya',
+            wilayahTagGrup: wilayahTag,
+            sessionId,
+          });
+          // Izinkan URL tiket LaporGub/AduanKonten tampil utuh di balasan
+          if (aduanResult?.pesan) {
+            const urlMatches = String(aduanResult.pesan).matchAll(/https?:\/\/[^\s]+/g);
+            for (const m of urlMatches) allowedUrls.add(m[0].replace(/[.,;]+$/, ''));
+          }
+          result = JSON.stringify(aduanResult);
           console.log('[brain] kirim_aduan_layanan hasil:', result);
         } else {
           result = 'Tool tidak dikenal.';
