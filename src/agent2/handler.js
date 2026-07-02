@@ -57,15 +57,6 @@ function renderMenuReply(menu, wilayahTag) {
 // Sinyal layanan publik fisik — kalau ada ini, biarkan brain.js yang handle (bukan pipeline penipuan)
 const PUBLIC_SERVICE_BYPASS = /\b(jalan|listrik|pln|air|pdam|sampah|lampu|drainase|banjir|trotoar|saluran|fasilitas umum|layanan publik|infrastruktur|rusak|berlubang|mati|padam|bocor|mampet)\b/i;
 
-function isExplicitLaporIntent(text) {
-  const t = String(text || '');
-  if (!(/\b(lapor|laporan|laporkan|laporin|melaporkan|ngelapor|ngelaporin|ngadu|aduan)\b/i.test(t))) return false;
-  // Kalau pesannya tentang layanan publik/infrastruktur, biarkan brain.js yang tangani
-  // supaya LLM bisa pakai tool kirim_aduan_layanan, bukan pipeline penipuan
-  if (PUBLIC_SERVICE_BYPASS.test(t)) return false;
-  return true;
-}
-
 // Ringkasan respons bot untuk analytics (bot bicara PII-free) — buang baris meta & potong.
 function ringkasResp(reply) {
   if (!reply) return null;
@@ -119,15 +110,9 @@ export async function respondToMessage({ text, konteks, scopeTags = null, wilaya
     return { reply: REFUSAL_REPLY, jenis: 'tolak', aksi: 'tolak', label: 'ditolak', grounded: false };
   }
 
-  if (isExplicitLaporIntent(text)) {
-    const lapor = await handleLapor({ text, wilayahTag, scopeTags, sessionId });
-    await logInteraksi({ konteks, jenis: 'lapor', aksi: 'lapor', label: 'lapor_explicit', wilayahTag, ringkasResp: ringkasResp(lapor.reply) });
-    if (sessionId && lapor.reply) {
-      pushTurn(sessionId, 'user', text);
-      pushTurn(sessionId, 'assistant', lapor.reply);
-    }
-    return { reply: lapor.reply, jenis: 'lapor', aksi: 'lapor', label: 'lapor_explicit', grounded: false };
-  }
+  // Semua intent "lapor" diserahkan ke brain.js (LLM) yang akan memutuskan
+  // apakah ini laporan penipuan (catat_laporan) atau aduan layanan publik (kirim_aduan_layanan).
+  // Tidak ada pre-filter deterministik di sini untuk menghindari false positive.
 
   const history = getHistory(sessionId); // ingatan obrolan efemeral (RAM) → multi-turn natural
   const r = await think(text, { history, scopeTags, wilayahTag, sessionId });

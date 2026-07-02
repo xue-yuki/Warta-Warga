@@ -541,7 +541,7 @@ async function consumeLaporLayananReply({ sessionId, text, imageText = null, ima
  * Menerima data yang sudah divalidasi LLM, langsung submit ke portal yang sesuai.
  * @returns {object} hasil yang akan dikirim balik ke LLM sebagai tool result
  */
-export async function submitLaporanLayanan({ deskripsi, kabupatenKota, kategori = "lainnya", wilayahTagGrup = null, sessionId = null }) {
+export async function submitLaporanLayanan({ deskripsi, kabupatenKota, kecamatanKelurahan = null, kategori = "lainnya", wilayahTagGrup = null, sessionId = null }) {
   // Tentukan wilayah tag
   let wilayahTag = wilayahTagGrup && isKabKota(wilayahTagGrup) ? wilayahTagGrup : null;
   if (!wilayahTag && kabupatenKota) {
@@ -581,11 +581,11 @@ export async function submitLaporanLayanan({ deskripsi, kabupatenKota, kategori 
   // Submit ke portal
   try {
     let hasil;
-    // Strip prefix Kab./Kota dari kabupatenKota sebelum dikirim ke form
-    // Form Select2 LaporGub mencari berdasarkan nama murni, bukan "Kab. Banyumas"
-    const lokasiForm = kabupatenKota
-      .replace(/^(kab(?:upaten)?\.?\s*|kota\s*)/i, "")
-      .trim();
+    // Query lokasi untuk Select2 LaporGub: pakai kecamatan/kelurahan dari LLM kalau ada,
+    // fallback ke nama kabupaten (strip prefix) — Select2 akan search dan ambil opsi pertama.
+    const lokasiQuery = kecamatanKelurahan
+      ? kecamatanKelurahan.replace(/^(kec(?:amatan)?\.?\s*|kel(?:urahan)?\.?\s*)/i, "").trim()
+      : kabupatenKota.replace(/^(kab(?:upaten)?\.?\s*|kota\s*)/i, "").trim();
 
     // Ambil gambar yang tersimpan untuk sesi ini (dikirim sebelumnya via WhatsApp)
     const storedImg = getStoredImage(sessionId);
@@ -599,7 +599,7 @@ export async function submitLaporanLayanan({ deskripsi, kabupatenKota, kategori 
     if (portal === "aduankonten") {
       hasil = await _submitToAduanKonten({ id, deskripsi: deskripsi.trim(), imageText: storedImg?.text || null, lampiranPath, kategori });
     } else {
-      hasil = await _submitToLaporGub({ id, deskripsi: deskripsi.trim(), lokasiDetail: lokasiForm, lokasiTag: wilayahTag, lampiranPath });
+      hasil = await _submitToLaporGub({ id, deskripsi: deskripsi.trim(), lokasiDetail: lokasiQuery, lokasiTag: wilayahTag, lampiranPath });
     }
     return { ok: hasil.reply?.startsWith("✅"), pesan: hasil.reply };
   } catch (err) {
@@ -615,23 +615,26 @@ async function _submitToLaporGub({ id, deskripsi, lokasiDetail, lokasiTag, lampi
     await insertLaporanLayananSubmitLog({ laporanId: id, portal: "laporgub", attempt: 1, status: "failed", errorMsg: "Deskripsi terlalu pendek" });
     return { reply: `⚠️ Deskripsi aduan terlalu pendek (${deskripsi?.trim().length || 0} karakter). LaporGub membutuhkan minimal 50 karakter. Silakan ceritakan masalahnya lebih detail ya — lokasi, kondisi, dan sudah berapa lama terjadi.` };
   }
-  // LaporGub Select2 mencari Kota/Kecamatan/Kelurahan. Untuk aduan seperti
-  // "Mersi ke Sokaraja", pakai detail lokasi di deskripsi alih-alih hanya "Banyumas".
-  const lokasiAduan = inferLaporgubLocationQuery(deskripsi, lokasiDetail, lokasiTag);
+  // lokasiDetail sudah berupa query siap pakai (kecamatan/kelurahan atau nama kabupaten strip prefix)
   const result = await submitLaporGub({
     isiAduan: deskripsi,
-    lokasiAduan,
+    lokasiAduan: lokasiDetail,
     jenisAduan: "Public",
     lampiranPath,
   });
   if (result.success) {
+    const ticket = result.ticketNumber || null;
+    const ticketUrl = ticket
+      ? `https://laporgub.jatengprov.go.id/detail/${encodeURIComponent(ticket)}.html`
+      : null;
     await updateLaporanLayananStatus(id, "submitted", {
-      nomor_ticket: result.ticketNumber || null,
+      nomor_ticket: ticket,
       submitted_at: new Date().toISOString(),
       notes: "Dikirim otomatis ke LaporGub",
     });
     await insertLaporanLayananSubmitLog({ laporanId: id, portal: "laporgub", attempt: 1, status: "success", errorMsg: null });
-    return { reply: `✅ Aduan sudah dikirim ke LaporGub. Nomor tiket: *${result.ticketNumber || "tidak tersedia"}*.` };
+    const linkInfo = ticketUrl ? `\n🔗 Cek status: ${ticketUrl}` : "";
+    return { reply: `✅ Aduan sudah dikirim ke LaporGub. Nomor tiket: *${ticket || "tidak tersedia"}*.${linkInfo}` };
   }
   await updateLaporanLayananStatus(id, "failed", { notes: result.error });
   await insertLaporanLayananSubmitLog({ laporanId: id, portal: "laporgub", attempt: 1, status: "failed", errorMsg: result.error });

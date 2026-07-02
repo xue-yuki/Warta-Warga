@@ -279,11 +279,21 @@ const TOOLS = [
         properties: {
           deskripsi: {
             type: 'string',
-            description: 'Deskripsi lengkap masalah layanan publik, minimal 50 karakter. Ceritakan apa masalahnya, di mana tepatnya, dan kondisinya seperti apa.',
+            description:
+              'Deskripsi LENGKAP masalah layanan publik minimal 50 karakter. ' +
+              'Pertahankan SEMUA informasi penting dari percakapan: apa masalahnya, di mana tepatnya (nama jalan/lokasi), sudah berapa lama, kondisi spesifik. ' +
+              'JANGAN meringkas atau membuang detail — tulis ulang dengan bahasa yang jelas dan lengkap.',
           },
           kabupaten_kota: {
             type: 'string',
             description: 'Nama kabupaten atau kota lokasi masalah, mis. "Kab. Purbalingga" atau "Kota Semarang".',
+          },
+          kecamatan_kelurahan: {
+            type: 'string',
+            description:
+              'OPSIONAL. Nama kecamatan atau kelurahan lokasi masalah jika disebutkan dalam percakapan. ' +
+              'Contoh: "Purwokerto Timur", "Arcawinangun", "Sokaraja". ' +
+              'Jangan isi jika tidak ada informasi spesifik kecamatan/kelurahan.',
           },
           kategori: {
             type: 'string',
@@ -483,6 +493,7 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
             await submitLaporanLayanan({
               deskripsi: args.deskripsi || '',
               kabupatenKota: args.kabupaten_kota || '',
+              kecamatanKelurahan: args.kecamatan_kelurahan || null,
               kategori: args.kategori || 'lainnya',
               wilayahTagGrup: wilayahTag,
               sessionId,
