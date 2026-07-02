@@ -651,27 +651,43 @@ async function _submitToAduanKonten({ id, deskripsi, imageText, lampiranPath, ka
     return { reply: "⚠️ Laporan konten membutuhkan URL/link situs yang ingin dilaporkan. Silakan kirim ulang dengan menyertakan link-nya ya." };
   }
 
-  const categoryId = toAduanKontenCategory(deskripsi);
-  const result = await submitAduanKonten({
-    url,
-    categoryId,
-    reason: deskripsi,
-    attachmentPath: lampiranPath || null,
-    headless: true,
-  });
+  const ACK_DITERIMA =
+    "✅ Laporan konten Bapak/Ibu sudah kami terima dan sedang diproses.\n\n" +
+    "Terima kasih telah melapor dan membantu menjaga keamanan internet. " +
+    "Tim kami akan menindaklanjuti laporan ini ke portal resmi 🙏";
 
-  if (result.success) {
-    const ticket = result.ticketNumber || result.existingSubmissionId || null;
-    const dupNote = result.duplicate ? " (konten sudah pernah dilaporkan sebelumnya)" : "";
-    await updateLaporanLayananStatus(id, "submitted", {
-      nomor_ticket: ticket,
-      submitted_at: new Date().toISOString(),
-      notes: `Dikirim otomatis ke AduanKonten${dupNote}`,
+  const categoryId = toAduanKontenCategory(deskripsi);
+  try {
+    const result = await submitAduanKonten({
+      url,
+      categoryId,
+      reason: deskripsi,
+      attachmentPath: lampiranPath || null,
+      headless: true,
     });
-    await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "success", errorMsg: null });
-    return { reply: `✅ Laporan konten sudah dikirim ke AduanKonten${dupNote}. Kode laporan: *${ticket || "tidak tersedia"}*.` };
+
+    if (result.success) {
+      const ticket = result.ticketNumber || result.existingSubmissionId || null;
+      const dupNote = result.duplicate ? " (konten sudah pernah dilaporkan sebelumnya)" : "";
+      await updateLaporanLayananStatus(id, "submitted", {
+        nomor_ticket: ticket,
+        submitted_at: new Date().toISOString(),
+        notes: `Dikirim otomatis ke AduanKonten${dupNote}`,
+      });
+      await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "success", errorMsg: null });
+      return { reply: `✅ Laporan konten sudah dikirim ke AduanKonten${dupNote}. Kode laporan: *${ticket || "tidak tersedia"}*.` };
+    }
+
+    // Submit tidak sukses (misal: Cloudflare block di VPS) — tetap catat dan beri ACK
+    console.warn(`[aduankonten] submit tidak sukses untuk id=${id}: ${result.error || "unknown"}`);
+    await updateLaporanLayananStatus(id, "failed", { notes: result.error || "Submit tidak sukses" });
+    await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "failed", errorMsg: result.error || null });
+    return { reply: ACK_DITERIMA };
+  } catch (err) {
+    // Error teknis (Cloudflare, timeout, dll) — tetap catat dan beri ACK
+    console.warn(`[aduankonten] error submit untuk id=${id}: ${err.message}`);
+    await updateLaporanLayananStatus(id, "failed", { notes: err.message });
+    await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "failed", errorMsg: err.message });
+    return { reply: ACK_DITERIMA };
   }
-  await updateLaporanLayananStatus(id, "failed", { notes: result.error || "Unknown error" });
-  await insertLaporanLayananSubmitLog({ laporanId: id, portal: "aduankonten", attempt: 1, status: "failed", errorMsg: result.error || null });
-  return { reply: `⚠️ Laporan konten gagal dikirim. Nanti coba lagi ya.` };
 }
