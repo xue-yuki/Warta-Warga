@@ -1,4 +1,4 @@
-import { allChunks, insertChunk } from '../db/index.js';
+import { allChunks, insertChunk, searchChunksByVector } from '../db/index.js';
 import { embed, embedMany, cosine } from '../embeddings/index.js';
 import { infoMatchesScope } from '../util/wilayah.js';
 
@@ -73,24 +73,34 @@ function lexicalBonus(qTokens, chunk) {
 }
 
 const LEX_WEIGHT = 0.4;
+// Ukuran pool kandidat dari pgvector (Postgres) sebelum re-ranking hybrid di JS. Lebih besar dari
+// k final agar bonus leksikal masih bisa mengubah urutan, tapi tetap jauh lebih kecil dari
+// seluruh tabel (itulah keuntungan index HNSW dibanding allChunks() penuh).
+const VECTOR_POOL_SIZE = 40;
 
 /**
  * Cari top-k chunk relevan (hybrid: embedding semantik + bonus leksikal).
+ * Kandidat diambil via pgvector (index HNSW, backend Postgres) bila tersedia — cepat & tak
+ * tarik seluruh tabel. SQLite (dev-lokal) atau bila pgvector gagal → fallback ke allChunks()
+ * + filter JS seperti semula. Scoring hybrid di bawah SELALU sama persis di kedua jalur.
  * @param {string} query
  * @param {object} [opts]
  * @param {string[]|null} [opts.scopeTags] bila diisi, hanya chunk yang cocok wilayah grup
  * @param {number} [opts.k]
  */
 export async function search(query, { scopeTags = null, k = 4 } = {}) {
-  const chunks = await allChunks();
-  if (chunks.length === 0) return [];
   const qVec = await embed(query);
   const qTokens = tokenize(query);
 
-  let candidates = chunks;
-  if (scopeTags) candidates = chunks.filter((c) => infoMatchesScope(c.wilayah_tag, scopeTags));
-  // Bila filter wilayah mengosongkan hasil, mundur ke seluruh chunk (lebih baik info nasional)
-  if (candidates.length === 0) candidates = chunks;
+  let candidates = await searchChunksByVector(qVec, { scopeTags, limit: VECTOR_POOL_SIZE }).catch(() => null);
+  if (!candidates) {
+    const chunks = await allChunks();
+    if (chunks.length === 0) return [];
+    candidates = scopeTags ? chunks.filter((c) => infoMatchesScope(c.wilayah_tag, scopeTags)) : chunks;
+    // Bila filter wilayah mengosongkan hasil, mundur ke seluruh chunk (lebih baik info nasional)
+    if (candidates.length === 0) candidates = chunks;
+  }
+  if (candidates.length === 0) return [];
 
   return candidates
     .map((c) => {

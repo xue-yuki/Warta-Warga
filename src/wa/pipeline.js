@@ -18,7 +18,7 @@ import { respondToMessage, GREETING } from "../agent2/handler.js";
 import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
 import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
-import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah } from "../util/wilayah.js";
+import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah, validateWilayahExists } from "../util/wilayah.js";
 import { scrapeRegion } from "../agent1/scheduler.js";
 import { config, hasSearch } from "../config.js";
 
@@ -77,6 +77,21 @@ export async function registerTarget({ jid, text, send, isGroup }) {
   }
 
   const wilayahTag = normalizeWilayahTag(arg);
+
+  // Validasi wilayah BENERAN ADA (kabupaten/kota/provinsi resmi) sebelum registrasi — tanpa ini,
+  // /start menerima nama daerah apa pun tanpa dicek (typo "Jomokerto" alih-alih "Mojokerto" akan
+  // ke-daftar mulus sbg kabupaten:jomokerto, lalu diam-diam tak pernah dapat info wilayah lagi).
+  const validation = validateWilayahExists(wilayahTag);
+  if (!validation.ok) {
+    await send(
+      `⚠️ Maaf, saya tidak menemukan daerah *"${arg}"* di daftar resmi kabupaten/kota/provinsi Indonesia.\n\n` +
+        (validation.suggestion
+          ? `Apakah maksud Bapak/Ibu *${validation.suggestion}*? Kalau iya, kirim ulang:\n\`/start ${validation.suggestion}\``
+          : `Coba periksa lagi ejaannya, atau kirim dengan format "Kab. <nama>" / "Kota <nama>".`),
+    );
+    return false;
+  }
+
   const provinsiTag = inferProvinsiTag(wilayahTag);
   await upsertGrup({ idGrup: jid, daerah: arg, wilayahTag, provinsiTag });
 
@@ -201,6 +216,10 @@ export async function handleContent(adapter, jid, { text, konteks, scopeTags, wi
 
   // Brain memutuskan aksi + menulis respons sekaligus (1 LLM call). Discovery regional diputuskan
   // dari aksi-nya: pertanyaan info untuk daerah yang belum ada datanya → tawarkan scrape on-demand.
+  // PENTING: harus JUGA cek !result.grounded — 'uncovered' cuma berarti daerah itu belum punya
+  // BARIS KB sendiri, bukan berarti pertanyaannya belum terjawab (banyak pertanyaan bersifat
+  // nasional & sudah kejawab dari entri wilayah_tag='nasional'). Tanpa cek grounded, jawaban yang
+  // SUDAH benar & bersumber bisa kebuang lalu diganti pesan "lagi nyari info bansos wilayahmu...".
   const aduanKontenStatusResult = await handleAduanKontenStatus({
     text,
     sessionId,
@@ -252,7 +271,7 @@ export async function handleContent(adapter, jid, { text, konteks, scopeTags, wi
 
   const result = await respondToMessage({ text, konteks, scopeTags, wilayahTag, justGreeted, sessionId });
 
-  if (result.aksi === "info" && uncovered && config.onDemandDiscovery.enabled && hasSearch() && !recentlyAttempted(target)) {
+  if (result.aksi === "info" && !result.grounded && uncovered && config.onDemandDiscovery.enabled && hasSearch() && !recentlyAttempted(target)) {
     if (regionJobs.has(target)) {
       await send(`Sabar ya kak 🙏 info buat *${humanWilayah(target)}* lagi aku cariin, sebentar lagi aku kabarin.`);
     } else {

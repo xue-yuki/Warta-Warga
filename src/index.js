@@ -7,12 +7,9 @@ import { initRuntime } from "./runtime/init.js";
 
 async function main() {
   await initRuntime();
-
-  // Agent 1 ingest scheduler jalan otomatis di latar belakang (refresh KB dari sumber resmi).
   startIngestScheduler();
 
-  // Dashboard approval pengurus (Fitur Lapor). Embed di proses bot agar approve langsung
-  // memakai koneksi WhatsApp untuk menyebar peringatan. Matikan dengan DASHBOARD_ENABLED=false.
+
   if ((process.env.DASHBOARD_ENABLED ?? "true") !== "false") {
     try {
       startDashboard();
@@ -21,9 +18,6 @@ async function main() {
     }
   }
 
-  // Transport WhatsApp: 'kirimi' (default, hosted gateway via webhook) atau 'baileys' (fallback,
-  // koneksi langsung + scan QR). Checker layanan (LaporGub + AduanKonten) di-start dari dalam
-  // masing-masing transport begitu pengirim siap (connection open / server listen).
   if (config.waTransport === "baileys") {
     console.log("\nMenyalakan WhatsApp bot (transport: Baileys langsung)...\n");
     await startBot();

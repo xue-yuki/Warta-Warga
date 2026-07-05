@@ -1,9 +1,9 @@
 {
-  "name": "warta-warga",
+  "name": "WartaAI",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Warta Warga — Asisten Info Bansos + Anti-Hoaks via WhatsApp (2 Agent AI)",
+  "description": "WartaAI — Asisten Info Bansos + Anti-Hoaks via WhatsApp (2 Agent AI)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

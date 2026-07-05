@@ -69,7 +69,7 @@ function unwrap(message) {
 function extractText(msg) {
   const m = unwrap(msg.message);
   if (!m) return "";
-  return (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || "").trim();
+  return (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || "").trim();
 }
 
 /** Bagian 'user' dari sebuah JID tanpa device & domain: 628xx:12@s.whatsapp.net → 628xx */
@@ -88,7 +88,7 @@ function userPart(jid) {
 function isMentioned(msg, sock) {
   const m = unwrap(msg.message);
   // Mention bisa ada di teks biasa ATAU di caption gambar/video.
-  const ctx = m?.extendedTextMessage?.contextInfo || m?.imageMessage?.contextInfo || m?.videoMessage?.contextInfo || m?.contextInfo;
+  const ctx = m?.extendedTextMessage?.contextInfo || m?.imageMessage?.contextInfo || m?.videoMessage?.contextInfo || m?.documentMessage?.contextInfo || m?.contextInfo;
   if (!ctx) return false;
 
   const botNums = new Set([userPart(sock?.user?.id), userPart(sock?.user?.lid)].filter(Boolean));
@@ -325,6 +325,24 @@ async function handleOne(sock, msg, botJid) {
         await send("Maaf, aku belum bisa membaca gambar 🙏 Tolong ketik isinya, atau kirim teks/link-nya ya.");
         return;
       }
+    }
+  }
+
+  // Dokumen/file (bukan gambar) — mis. ".exe"/".apk" yang disamarkan sebagai "undangan"/"surat" adalah
+  // modus malware yang umum. Isi file TIDAK diunduh/dipindai (di luar cakupan) — cukup kabari brain soal
+  // nama & jenis filenya lewat teks, karena itu saja sudah sinyal kuat (nama undangan tapi ekstensi .exe).
+  const doc = unwrap(msg.message)?.documentMessage;
+  if (doc && !isStartCommand(text)) {
+    const willRespond = isGroup ? isMentioned(msg, sock) : true;
+    if (willRespond) {
+      const filename = doc.fileName || doc.title || "(tanpa nama)";
+      const ext = filename.match(/\.[a-z0-9]+$/i)?.[0]?.toLowerCase() || "";
+      const sizeKb = doc.fileLength ? Math.round(Number(doc.fileLength) / 1024) : null;
+      const meta =
+        `[Lampiran file dari warga] nama file: "${filename}"${ext ? ` (ekstensi ${ext})` : ""}` +
+        `${sizeKb ? `, ukuran ${sizeKb} KB` : ""}, tipe: ${doc.mimetype || "tidak diketahui"}. ` +
+        `(Isi file TIDAK dibuka/dipindai otomatis — nilai dari nama & jenis filenya saja.)`;
+      text = [text, meta].filter(Boolean).join("\n\n");
     }
   }
 

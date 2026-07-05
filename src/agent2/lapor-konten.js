@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { chatJson } from "../llm/openrouter.js";
-import { hasAduanKonten, hasLLM } from "../config.js";
+import { config, hasAduanKonten, hasLLM } from "../config.js";
 import { insertLaporanLayanan, updateLaporanLayananStatus, insertLaporanLayananSubmitLog } from "../db/index.js";
 import { ADUANKONTEN_CATEGORIES, submitAduanKonten } from "../portal/aduankonten.js";
 import { inspectUrl } from "./checkurl.js";
@@ -463,6 +463,10 @@ export async function handleLaporKonten({
   onSubmitResult = null,
   onSubmitDone = null,
 }) {
+  // Alur percakapan aduan konten dimatikan sementara (config.aduankonten.chatEnabled) — lewati
+  // intercept otomatis; biarkan pesan diteruskan ke brain.js (cek_url) utk verifikasi langsung.
+  if (!config.aduankonten.chatEnabled) return null;
+
   const pending = getPending(sessionId);
   if (pending) {
     return consumeLaporKontenReply({
@@ -515,6 +519,8 @@ export async function handleLaporKonten({
 }
 
 export async function maybeOfferAduanKontenReport({ text, reply, imageText = null, imageBuffer = null, imageMimetype = null, sessionId = null, messageId = null }) {
+  if (!config.aduankonten.chatEnabled) return reply;
+
   const message = [text, imageText].filter(Boolean).join("\n\n");
   const url = extractUrl(message);
   if (!url || !reply || isSafeOfficialUrlReply(reply)) return reply;

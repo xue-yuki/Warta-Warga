@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS info_bansos (
   image_path      TEXT
 );
 
+-- embedding_vec (vector(384) + index HNSW) SENGAJA tidak di CREATE TABLE ini: tipe `vector`
+-- baru ada setelah `CREATE EXTENSION vector`, yang dijalankan belakangan oleh
+-- ensurePgVector() di db/index.js (mengurus extension+kolom+backfill+index sekaligus,
+-- aman dipanggil berkali-kali, jalan sama untuk DB baru maupun yang sudah ada).
 CREATE TABLE IF NOT EXISTS kb_chunks (
   id            SERIAL PRIMARY KEY,
   info_id       INTEGER REFERENCES info_bansos(id) ON DELETE CASCADE,

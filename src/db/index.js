@@ -19,6 +19,30 @@ let _sqlite = null;
 let _pg = null;
 let _pgReady = null;
 
+// Kolom yang ditambahkan SETELAH tabel awal dibuat (schema.sql/schema.pg.sql CREATE TABLE tidak
+// menjangkau DB yang sudah lebih dulu ada). SATU daftar dipakai KEDUA backend — SQLite lewat
+// ensureColumn (di bawah), Postgres lewat ALTER di pgInit() — supaya menambah kolom baru cukup
+// 1 baris di sini, bukan edit terpisah di 2 tempat yang gampang lupa salah satu (lihat riwayat
+// git: pola ini sempat ke-duplikat manual untuk info_bansos.image_path).
+const COLUMN_MIGRATIONS = [
+  ['info_bansos', 'batas_daftar', 'TEXT'],
+  ['info_bansos', 'image_id', 'TEXT'],
+  ['info_bansos', 'image_path', 'TEXT'],
+  ['kb_chunks', 'batas_daftar', 'TEXT'],
+  ['log_interaksi', 'aksi', 'TEXT'],
+  ['log_interaksi', 'ringkas_pesan', 'TEXT'],
+  ['log_interaksi', 'ringkas_resp', 'TEXT'],
+  ['laporan_layanan', 'last_status_notified_at', 'TEXT'],
+  ['laporan', 'sumber_urls', 'TEXT'],
+  ['laporan', 'embedding', 'TEXT'], // JSONB di Postgres — lihat PG_COLUMN_TYPE_OVERRIDE
+  ['laporan', 'cluster_reason', 'TEXT'],
+];
+
+// Override tipe kolom untuk Postgres saat tipe idealnya beda dari SQLite (JSONB vs TEXT polos).
+const PG_COLUMN_TYPE_OVERRIDE = {
+  'laporan.embedding': 'JSONB',
+};
+
 function sqliteDb() {
   if (_sqlite) return _sqlite;
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
@@ -26,17 +50,7 @@ function sqliteDb() {
   _sqlite.pragma('journal_mode = WAL');
   _sqlite.pragma('foreign_keys = ON');
   _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
-  ensureColumn(_sqlite, 'info_bansos', 'batas_daftar', 'TEXT');
-  ensureColumn(_sqlite, 'info_bansos', 'image_id', 'TEXT');
-  ensureColumn(_sqlite, 'info_bansos', 'image_path', 'TEXT');
-  ensureColumn(_sqlite, 'kb_chunks', 'batas_daftar', 'TEXT');
-  ensureColumn(_sqlite, 'log_interaksi', 'aksi', 'TEXT');
-  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_pesan', 'TEXT');
-  ensureColumn(_sqlite, 'log_interaksi', 'ringkas_resp', 'TEXT');
-  ensureColumn(_sqlite, 'laporan_layanan', 'last_status_notified_at', 'TEXT');
-  ensureColumn(_sqlite, 'laporan', 'sumber_urls', 'TEXT');
-  ensureColumn(_sqlite, 'laporan', 'embedding', 'TEXT');
-  ensureColumn(_sqlite, 'laporan', 'cluster_reason', 'TEXT');
+  for (const [table, col, type] of COLUMN_MIGRATIONS) ensureColumn(_sqlite, table, col, type);
   return _sqlite;
 }
 
@@ -50,38 +64,45 @@ async function pgInit() {
   _pg = postgres(config.supabase.dbUrl, { ssl: "require", prepare: false, max: 5, idle_timeout: 20, onnotice: () => {} });
   const ddl = fs.readFileSync(path.join(__dirname, "schema.pg.sql"), "utf8");
   await _pg.unsafe(ddl); // idempoten (CREATE IF NOT EXISTS)
-  try {
-    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_id TEXT`;
-    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
+  for (const [table, col, type] of COLUMN_MIGRATIONS) {
+    const pgType = PG_COLUMN_TYPE_OVERRIDE[`${table}.${col}`] || type;
+    try {
+      await _pg.unsafe(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${col} ${pgType}`);
+    } catch (err) {
+      /* ignore if column exists or alter not supported */
+    }
   }
-  try {
-    await _pg`ALTER TABLE info_bansos ADD COLUMN IF NOT EXISTS image_path TEXT`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
-  }
-  try {
-    await _pg`ALTER TABLE laporan_layanan ADD COLUMN IF NOT EXISTS last_status_notified_at TEXT`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
-  }
-  try {
-    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS sumber_urls TEXT`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
-  }
-  try {
-    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS embedding JSONB`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
-  }
-  try {
-    await _pg`ALTER TABLE laporan ADD COLUMN IF NOT EXISTS cluster_reason TEXT`;
-  } catch (err) {
-    /* ignore if column exists or alter not supported */
-  }
+  await ensurePgVector(_pg);
   return _pg;
+}
+
+// Dimensi embedding lokal (Xenova/all-MiniLM-L6-v2). Hanya dipakai backend Postgres — SQLite
+// tetap simpan embedding sebagai TEXT/JSON biasa (better-sqlite3 tidak punya tipe vector native,
+// dan di skala dev-lokal full-scan JS cukup cepat, tak perlu index).
+const EMBEDDING_DIM = 384;
+
+/** Pastikan pgvector aktif + kolom embedding_vec terisi + index HNSW ada. Idempoten, aman diulang. */
+async function ensurePgVector(pg) {
+  try {
+    await pg.unsafe(`CREATE EXTENSION IF NOT EXISTS vector`);
+    await pg.unsafe(`ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS embedding_vec vector(${EMBEDDING_DIM})`);
+    // Backfill baris lama (mis. hasil ingest sebelum kolom ini ada) dari embedding JSONB.
+    await pg.unsafe(`
+      UPDATE kb_chunks
+      SET embedding_vec = (
+        SELECT array_agg(elem::float8 ORDER BY ord)::vector
+        FROM jsonb_array_elements_text(embedding) WITH ORDINALITY AS t(elem, ord)
+      )
+      WHERE embedding_vec IS NULL AND dim = ${EMBEDDING_DIM}`);
+    await pg.unsafe(`CREATE INDEX IF NOT EXISTS kb_chunks_embedding_vec_hnsw ON kb_chunks USING hnsw (embedding_vec vector_cosine_ops)`);
+  } catch (err) {
+    console.warn('[DB] pgvector setup gagal (lanjut pakai fallback JS cosine):', err.message);
+  }
+}
+
+/** Format array angka jadi literal vector Postgres, mis. [0.1,0.2] → "[0.1,0.2]". */
+function toVectorLiteral(vec) {
+  return `[${vec.join(',')}]`;
 }
 
 /** Pastikan backend siap. Untuk Postgres: konek + jalankan skema idempoten (sekali). */
@@ -867,9 +888,14 @@ export async function logInteraksi({ konteks, jenis, aksi = null, label, wilayah
 export async function insertChunk(c) {
   await initDb();
   if (hasSupabase()) {
+    // embedding_vec hanya diisi kalau dimensinya cocok dgn kolom vector(EMBEDDING_DIM) — beda
+    // dimensi (mis. provider embedding lain) akan NULL di sini & otomatis dilewati oleh pencarian
+    // vektor (lihat searchChunksByVector), bukan error.
+    const vecLiteral = c.embedding.length === EMBEDDING_DIM ? toVectorLiteral(c.embedding) : null;
+    // vecLiteral null → "NULL::vector" tetap valid SQL (NULL), jadi tak perlu cabang terpisah.
     await _pg`
-      INSERT INTO kb_chunks (info_id, program, content, embedding, dim, sumber_url, wilayah_tag, tanggal_ambil, batas_daftar)
-      VALUES (${c.info_id}, ${c.program}, ${c.content}, ${_pg.json(c.embedding)}, ${c.embedding.length}, ${c.sumber_url}, ${c.wilayah_tag}, ${c.tanggal_ambil}, ${c.batas_daftar || null})`;
+      INSERT INTO kb_chunks (info_id, program, content, embedding, embedding_vec, dim, sumber_url, wilayah_tag, tanggal_ambil, batas_daftar)
+      VALUES (${c.info_id}, ${c.program}, ${c.content}, ${_pg.json(c.embedding)}, ${vecLiteral}::vector, ${c.embedding.length}, ${c.sumber_url}, ${c.wilayah_tag}, ${c.tanggal_ambil}, ${c.batas_daftar || null})`;
     return;
   }
   sq()
@@ -894,6 +920,38 @@ export async function allChunks() {
   await initDb();
   const rows = hasSupabase() ? [...(await _pg`SELECT * FROM kb_chunks`)] : sq().prepare("SELECT * FROM kb_chunks").all();
   // embedding: Postgres JSONB → sudah array; SQLite TEXT → perlu parse.
+  return rows.map((r) => ({ ...r, embedding: typeof r.embedding === "string" ? JSON.parse(r.embedding) : r.embedding }));
+}
+
+/**
+ * Ambil kandidat chunk terdekat via pgvector (index HNSW) — dipakai kb/vectorStore.js sebagai
+ * pengganti allChunks() SAAT backend Postgres, supaya tak perlu tarik SELURUH tabel tiap query
+ * (allChunks() tetap ada untuk SQLite/fallback). Pemanggil TETAP menghitung skor hybrid
+ * (semantik+leksikal) sendiri di JS dari embedding yang dikembalikan — fungsi ini cuma
+ * mempersempit kandidat, bukan mengganti scoring.
+ * @returns {Promise<Array|null>} null bila backend bukan Postgres (pemanggil fallback ke allChunks()).
+ */
+export async function searchChunksByVector(queryVec, { scopeTags = null, limit = 40 } = {}) {
+  await initDb();
+  if (!hasSupabase()) return null;
+  const lit = toVectorLiteral(queryVec);
+  const run = (withScope) =>
+    withScope
+      ? _pg`
+          SELECT * FROM kb_chunks
+          WHERE embedding_vec IS NOT NULL
+            AND (wilayah_tag = 'nasional' OR wilayah_tag = ANY(${scopeTags}))
+          ORDER BY embedding_vec <=> ${lit}::vector
+          LIMIT ${limit}`
+      : _pg`
+          SELECT * FROM kb_chunks
+          WHERE embedding_vec IS NOT NULL
+          ORDER BY embedding_vec <=> ${lit}::vector
+          LIMIT ${limit}`;
+  let rows = [...(await run(Boolean(scopeTags)))];
+  // Sama seperti fallback lama di vectorStore.js: scope mengosongkan hasil → coba seluruh KB
+  // (lebih baik tampilkan info nasional daripada kosong sama sekali).
+  if (scopeTags && rows.length === 0) rows = [...(await run(false))];
   return rows.map((r) => ({ ...r, embedding: typeof r.embedding === "string" ? JSON.parse(r.embedding) : r.embedding }));
 }
 

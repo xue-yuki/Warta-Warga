@@ -2,6 +2,12 @@
 // Info dipakai untuk sebuah grup jika wilayah_tag info termasuk:
 //   "nasional" ATAU provinsi grup ATAU kabupaten grup.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const slug = (s) =>
   String(s)
     .toLowerCase()
@@ -22,6 +28,84 @@ export function normalizeWilayahTag(input) {
   }
   // Tanpa prefiks level → anggap nama daerah kabupaten/kota
   return `kabupaten:${slug(raw)}`;
+}
+
+// ---------- Validasi wilayah nyata (cegah /start ke daerah yang tak ada, mis. typo) ----------
+// Daftar 479 kabupaten/kota + 34 provinsi resmi (sumber BPS Indonesia 2024, sinkron dengan
+// warta-warga-web/src/app/lib/indonesia-coordinates.json). Tanpa ini, /start menerima APA SAJA
+// (cuma di-slug-kan, tak pernah divalidasi) → grup bisa ke-daftar ke daerah fiktif (typo "Jomokerto"
+// alih-alih "Mojokerto") dan diam-diam tak akan pernah dapat info wilayah/broadcast selamanya.
+let _wilayahData = null;
+function loadWilayahData() {
+  if (_wilayahData) return _wilayahData;
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '../../data/wilayah_valid.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    _wilayahData = {
+      kabKota: new Set(parsed.kabupaten_kota || []),
+      provinsi: new Set(parsed.provinsi || []),
+    };
+  } catch (e) {
+    console.warn('[wilayah] Gagal baca data/wilayah_valid.json — validasi /start dilewati:', e.message);
+    _wilayahData = { kabKota: new Set(), provinsi: new Set() };
+  }
+  return _wilayahData;
+}
+
+/** Jarak edit (Levenshtein) sederhana — dipakai untuk saran "maksud Anda ...?" saat typo. */
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/** Cari nama daerah terdekat di daftar resmi (untuk saran typo). null bila tak ada yang cukup dekat. */
+function closestMatch(target, candidates) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const d = levenshtein(target, c);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
+  // Ambang toleransi typo relatif thd panjang nama (nama pendek → toleransi lebih ketat).
+  const tolerance = Math.max(1, Math.floor(target.length * 0.3));
+  return best && bestDist <= tolerance ? { name: best, distance: bestDist } : null;
+}
+
+const humanizeSlug = (s) => s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+/**
+ * Validasi APAKAH wilayah_tag hasil normalizeWilayahTag() itu daerah yang BENAR-BENAR ADA
+ * (kabupaten/kota/provinsi resmi Indonesia, atau "nasional"). Dipakai saat /start supaya tak ada
+ * grup ter-registrasi ke daerah fiktif/typo.
+ * @returns {{ok: boolean, suggestion: string|null}} suggestion = label manusiawi kandidat terdekat bila typo terdeteksi
+ */
+export function validateWilayahExists(wilayahTag) {
+  if (!wilayahTag || wilayahTag === 'nasional') return { ok: true, suggestion: null };
+  const data = loadWilayahData();
+  // Data belum berhasil dimuat (mis. file hilang) → jangan blokir registrasi, cukup lewati validasi.
+  if (data.kabKota.size === 0 && data.provinsi.size === 0) return { ok: true, suggestion: null };
+
+  const [level, name] = wilayahTag.split(':');
+  if (level === 'provinsi') {
+    if (data.provinsi.has(name)) return { ok: true, suggestion: null };
+    const match = closestMatch(name, data.provinsi);
+    return { ok: false, suggestion: match ? `Prov. ${humanizeSlug(match.name)}` : null };
+  }
+  // level === 'kabupaten' (satu-satunya level non-provinsi yang dihasilkan normalizeWilayahTag)
+  if (data.kabKota.has(name)) return { ok: true, suggestion: null };
+  const match = closestMatch(name, data.kabKota);
+  return { ok: false, suggestion: match ? humanizeSlug(match.name) : null };
 }
 
 /**

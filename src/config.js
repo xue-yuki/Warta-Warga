@@ -42,6 +42,12 @@ export const config = {
   },
 
   aduankonten: {
+    // Saklar alur percakapan (bukan checker berkala di bawah): default MATI — matikan intercept
+    // otomatis "isAduanKontenIntent" & penawaran follow-up "mau saya laporkan ke aduankonten.id?"
+    // di lapor-konten.js, supaya warga yang tanya "ini penipuan bukan ya?" langsung dapat jawaban
+    // verifikasi (via cek_url di brain.js), bukan disodori form aduan yang tidak mereka minta.
+    // Set ADUANKONTEN_CHAT_ENABLED=true untuk mengaktifkan lagi.
+    chatEnabled: (process.env.ADUANKONTEN_CHAT_ENABLED ?? "false") === "true",
     baseUrl: process.env.ADUANKONTEN_BASE_URL || "https://aduankonten.id",
     sessionPath: abs(process.env.ADUANKONTEN_SESSION_PATH || "./.aduankonten_session.json"),
     userDataDir: abs(process.env.ADUANKONTEN_USER_DATA_DIR || "./.aduankonten_profile"),
@@ -124,12 +130,6 @@ export const config = {
     apiKey: process.env.VISION_API_KEY || process.env.VISION_API || "",
     baseUrl: process.env.VISION_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai",
     model: process.env.VISION_MODEL || "gemini-flash-lite-latest",
-  },
-
-  images: {
-    apiKey: process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY || "",
-    baseUrl: process.env.IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
-    model: process.env.IMAGE_MODEL || "gpt-image-2",
   },
 
   images: {

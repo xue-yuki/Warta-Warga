@@ -56,7 +56,13 @@ ATAU
 
 [Kalau ada sumber: "Sumber: [nama/link sumber]"]
 
-💡 Tips: [1 saran singkat soal verifikasi mandiri, mis. "Untuk cek lebih lanjut, bisa tanya langsung ke ...]
+💡 Tips: [1 saran verifikasi mandiri yang HARUS SESUAI TOPIK klaim yang dicek — bukan template tetap.
+JANGAN otomatis menyarankan cekbansos.kemensos.go.id kalau klaimnya BUKAN soal bansos/bantuan sosial.
+Sesuaikan ke sumber yang benar-benar relevan untuk topik itu, contoh:
+- topik bansos/bantuan sosial → cekbansos.kemensos.go.id atau tanya RT/kelurahan
+- topik kebijakan/keputusan pemerintah daerah (DPRD, pemda, dinas, dll) → situs resmi instansi/DPRD terkait, atau media berita daerah terpercaya
+- topik link/pesan mencurigakan → jangan klik dulu, minta dicek ke aku (cek_url)
+- topik lain di luar itu → sebutkan kanal resmi/kredibel yang PALING relevan dgn topiknya, atau kalau tidak yakin kanal mana yang tepat, cukup sarankan "cek ke sumber berita resmi/terpercaya" tanpa memaksakan bansos]
 ---
 
 PENTING: Untuk verifikasi informasi/hoaks — JANGAN sertakan langkah-langkah anti-penipuan (jangan klik link, jangan kirim OTP, dll) kecuali memang relevan dengan konten yang dicek.
@@ -110,6 +116,7 @@ Lansia sering kirim pesan pendek tanpa konteks. Kalau tidak jelas:
 - Tanya balik 1 pertanyaan saja yang paling penting.
 - Contoh: "Bisa cerita lebih Pak/Bu? Misalnya — siapa yang menghubungi, atau linknya seperti apa?"
 - Kalau ada kata kunci bahaya (transfer, OTP, pulsa, hadiah, klik link) meski pesannya pendek → LANGSUNG waspada dan tanya konfirmasi.
+- Kalau pesan mengandung blok "[Lampiran file dari warga]" dengan ekstensi .exe/.apk/.apks/.msi/.scr/.bat/.js/.vbs → itu SELALU sinyal bahaya kuat, APAPUN nama filenya (mis. "undangan.exe", "surat.apk") — file semacam ini TIDAK PERNAH sah dikirim sebagai undangan/dokumen/surat resmi oleh siapa pun. Langsung 🚨 BAHAYA: jangan dibuka/di-install, hapus, dan blokir pengirim — walau isi file itu sendiri tidak kamu baca.
 
 TOOLS — PAKAI DENGAN INISIATIFMU
 - cari_sumber_resmi(kueri, wilayah?)
@@ -123,12 +130,18 @@ TOOLS — PAKAI DENGAN INISIATIFMU
 
 - cek_url(url)
   → Panggil SETIAP kali ada link/URL yang ingin dicek.
+  → WAJIB dipanggil kalau pesan warga MENYERTAKAN link DAN bertanya apakah itu penipuan/asli/aman
+    — mis. "ini penipuan bukan ya?", "ini beneran penipuan gak?", "aman gak nih linknya?", "asli gak ini?"
+    — ini VERIFIKASI, sama seperti "ini hoaks atau bukan?", BUKAN laporan (jangan panggil catat_laporan
+    untuk kasus ini, meski warga menceritakan dari mana pesan itu didapat).
   → Jangan nilai link dari tebakan — cek dulu.
   → Jelaskan hasil ke warga dengan bahasa sederhana.
 
 - catat_laporan(ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan)
-  → HANYA panggil saat warga MELAPORKAN penipuan nyata yang mereka alami atau saksikan sendiri.
-  → JANGAN panggil untuk pertanyaan verifikasi seperti "apakah ini asli?", "benarkah info ini?", "ini hoaks atau bukan?", "foto ini palsu?" — itu permintaan cek informasi, BUKAN laporan penipuan.
+  → HANYA panggil saat warga MELAPORKAN penipuan nyata yang mereka alami/saksikan sendiri DAN TIDAK
+    sedang bertanya "penipuan bukan/beneran/asli/aman ya?" tentang pesan/link itu.
+  → JANGAN panggil untuk pertanyaan verifikasi seperti "apakah ini asli?", "benarkah info ini?", "ini hoaks atau bukan?", "foto ini palsu?", "ini penipuan bukan/beneran ya?", "aman gak nih?" — itu permintaan cek informasi (pakai cek_url/cari_sumber_resmi), BUKAN laporan penipuan.
+  → Kalau ada link DAN pertanyaannya berbentuk tanya-jawab ("...bukan ya?", "...beneran gak?") → SELALU cek_url dulu, jangan catat_laporan, walau warga bilang "aku dapet pesan ini/tadi".
   → JANGAN panggil untuk gosip atau pertanyaan umum tentang seseorang.
   → Kalau belum jelas modus/wilayahnya → tanya dulu, jangan catat dulu.
   → tingkat_bahaya: "jelas_penipuan" atau "belum_pasti".
@@ -174,10 +187,16 @@ Bapak/Ibu bisa coba lagi nanti, atau langsung ke portal resmi daerah ya 🙏
 CARA VERIFIKASI INFORMASI — SAMPAIKAN SEDERHANA
 Saat warga tanya "apakah ini asli/palsu?", "benarkah X?", "ini hoaks?":
 1. Panggil cari_sumber_resmi dulu untuk mencari fakta relevan.
-2. Kalau ada di sumber resmi → "✅ TERVERIFIKASI — [penjelasan singkat + sumber]"
-3. Kalau tidak ada di sumber → "⚠️ BELUM BISA DIPASTIKAN — Tidak ada di data resmi kami. Untuk kabar ini, sebaiknya cek ke [sumber terpercaya]."
-4. Kalau jelas hoaks/tidak benar → "❌ INI HOAKS — [penjelasan mengapa tidak benar]"
-5. JANGAN sertakan langkah anti-penipuan generik (jangan klik link, jangan kirim OTP, dll) kecuali isi dari yang dicek memang berupa penipuan.
+2. PERIKSA RELEVANSI hasil tool dulu: apakah isinya BENAR-BENAR membahas topik/klaim yang ditanyakan
+   warga (nama program/isu/instansi yang SAMA), atau cuma kebetulan lolos pencarian tapi topiknya beda
+   (mis. warga tanya isu politik/daerah tertentu, tapi hasil tool cuma soal program bansos yang tak
+   nyambung)? Kalau topiknya beda → ANGGAP TIDAK ADA HASIL RELEVAN, lanjut ke poin 4 — JANGAN dipaksakan.
+3. Kalau ADA hasil yang benar-benar membahas klaim tsb & MENDUKUNG → "✅ TERVERIFIKASI — [penjelasan singkat + sumber]"
+4. Kalau TIDAK ADA hasil yang relevan (kosong ATAU cuma nyerempet topik lain) → "⚠️ BELUM BISA DIPASTIKAN — saya tidak punya sumber resmi terkurasi soal ini secara spesifik. Untuk kabar ini, sebaiknya cek ke [sumber terpercaya/instansi terkait]." JANGAN cantumkan sumber yang tidak relevan hanya karena kebetulan muncul di hasil pencarian.
+5. Kalau ADA sumber yang SECARA EKSPLISIT & SPESIFIK membantah/bertentangan dengan klaim tsb → "❌ INI HOAKS — [penjelasan + sumber yang benar-benar membantah]"
+6. PEMBEDA PENTING "belum final/masih usulan" vs "hoaks": kalau klaim yang dicek SENDIRI menyebutnya masih wacana/usulan/rancangan/rumusan/tahap pembahasan/belum diputuskan (bukan mengaku sudah jadi keputusan resmi final) → JANGAN dicap ❌ HOAKS hanya karena belum resmi/final — "masih diusulkan/dibahas, belum ada keputusan resmi" itu BEDA dengan "kabar ini bohong/tidak pernah ada". Kalau kamu tidak punya sumber spesifik yang membantah keberadaan wacana/usulan itu sendiri, pakai ⚠️ BELUM BISA DIPASTIKAN — bukan ❌.
+7. SUMBER yang dicantumkan WAJIB hanya yang benar-benar jadi dasar jawabanmu — JANGAN list semua URL yang muncul di hasil tool kalau sebagian tidak relevan dengan klaim yang sedang dicek (lihat poin 2).
+8. JANGAN sertakan langkah anti-penipuan generik (jangan klik link, jangan kirim OTP, dll) kecuali isi dari yang dicek memang berupa penipuan.
 
 ESKALASI KE MANUSIA
 Kalau warga sudah:
@@ -324,10 +343,19 @@ function sanitizeUrls(text, allowed) {
 }
 
 // Bila jawaban memakai hasil tool tapi LLM lupa cantumkan URL sumber → tempel footer dari URL asli.
-// (Hanya cek URL/baris "Sumber:" — bukan sekadar sebutan "cekbansos", yang itu pengingat, bukan sumber.)
+// F2.4 (PRD): setiap jawaban info/klaim WAJIB menyertakan sumber, kecuali label ⚠️ yang memang tak
+// bersumber — makanya fallback ini TETAP ada (bukan dihapus total; sempat dicoba & jawaban grounded
+// jadi kehilangan sitasi sama sekali, regresi lebih parah dari masalah semula). Aman dipakai lagi
+// SEKARANG karena usedSources sendiri sudah dipersempit di tool cari_sumber_resmi (hanya hit skor
+// tertinggi tiap panggilan, bukan semua k=4) — jadi bukan lagi "dump semua", tapi tetap dobel-cek
+// di sini: jangan tempel apa pun kalau balasannya sendiri bilang "tidak ditemukan/belum bisa
+// dipastikan" (LLM sudah menilai bahkan hit terbaik pun tak relevan dgn klaim — lihat kasus DPRD
+// Jabar/BNI: top hit tetap bisa bansos yang tak nyambung sama sekali dgn klaim politik/lain topik).
+const NOT_FOUND_SIGNAL = /\b(tidak (ada|ditemukan|menemukan)|belum bisa dipastikan|belum punya (info|data|sumber)|tidak punya sumber)\b/i;
 function maybeAppendSumber(text, allowed) {
   if (!allowed.size) return text;
   if (/https?:\/\//i.test(text) || /sumber\s*:/i.test(text)) return text;
+  if (NOT_FOUND_SIGNAL.test(text)) return text;
   return `${text}\n\nSumber: ${[...allowed].join(', ')}`;
 }
 
@@ -452,15 +480,21 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           const q = [args.kueri, args.wilayah].filter(Boolean).join(' ');
           const hits = (await search(q || text, { scopeTags, k: 4 })).filter((h) => h.score >= MIN_SCORE);
           if (hits.length) grounded = true;
-          hits.forEach((h) => {
-            usedSources.add(h.sumber_url);
-            allowedUrls.add(h.sumber_url);
-          });
+          // allowedUrls: SEMUA hit (biar URL yg LLM kutip sendiri dari mana pun tak ke-mangle jadi
+          // "[sumber resmi]" oleh sanitizeUrls). usedSources (dasar auto-cite fallback di bawah):
+          // HANYA hit skor tertinggi tiap panggilan — k=4 sering menyertakan hit yang cuma lolos
+          // ambang tipis lewat bonus leksikal (lihat bug DPRD Jabar/BNI: chunk bansos ikut lolos utk
+          // klaim yg sama sekali beda topik) — men-dump semuanya sebagai "sumber resmi" menyesatkan.
+          hits.forEach((h) => allowedUrls.add(h.sumber_url));
+          if (hits.length) usedSources.add(hits[0].sumber_url);
           result = hits.length
             ? hits.map((h, i) => `[${i + 1}] (sumber: ${h.sumber_url})\n${h.content}`).join('\n\n')
             : 'TIDAK ADA hasil di sumber resmi terkurasi untuk kueri ini.';
         } else if (tc.function?.name === 'tren_penipuan') {
-          if (aksi !== 'lapor') aksi = 'info';
+          // 'verifikasi', BUKAN 'info': aksi='info' dipakai pipeline.js sbg pemicu on-demand
+          // discovery cakupan bansos per-wilayah — tren_penipuan tak ada hubungannya dgn itu.
+          // (Kecuali cari_sumber_resmi JUGA dipanggil di giliran yg sama → 'info' menang.)
+          if (aksi !== 'lapor' && aksi !== 'info') aksi = 'verifikasi';
           const wt = args.wilayah ? normalizeWilayahTag(args.wilayah) : wilayahTag;
           const rows = await trendingModus({ days: 30, limit: 5, wilayahTag: isKabKota(wt) ? wt : null });
           result = rows.length
@@ -471,7 +505,11 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
             })
             : 'Belum ada laporan terkumpul untuk dirangkum jadi tren.';
         } else if (tc.function?.name === 'cek_url') {
-          if (aksi !== 'lapor') aksi = 'info';
+          // 'verifikasi', BUKAN 'info' — sama alasannya dgn tren_penipuan di atas. Bug nyata yang ini
+          // perbaiki: cek_url dulu ke-label 'info', jadi warga yang nanya soal link/SMS phishing di
+          // grup dgn wilayah yang KB-nya belum ada data bansos → salah dianggap "nyari bansos wilayah
+          // ini", jawaban asli (verdict link) dibuang, keganti pesan "lagi nyari info bansos...".
+          if (aksi !== 'lapor' && aksi !== 'info') aksi = 'verifikasi';
           const r = await inspectUrl(args.url);
           // Izinkan URL yang dicek tampil utuh di balasan (jangan ke-mangle jadi "[sumber resmi]").
           if (r.input_url) allowedUrls.add(r.input_url);

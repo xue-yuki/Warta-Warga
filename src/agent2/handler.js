@@ -9,28 +9,29 @@ import { isInjection, isOffTopicTask, looksLikeCode, REFUSAL_REPLY } from './gua
 import { humanWilayah } from '../util/wilayah.js';
 import { consumeLaporReply, handleLapor } from './lapor.js';
 
-export const GREETING = `👋 Halo! Saya *Warta Warga*, teman info bansos & waspada penipuan.
- 
-Saya bisa bantu:
-1️⃣ *Tanya info bansos* — mis. "syarat PKH apa?" atau "ada bansos di daerahku?"
-2️⃣ *Cek kabar* — kirim kabar yang kamu ragukan, mis. "ini benar nggak: ada bantuan 600rb klik link..."
-3️⃣ *Lapor penipuan* — modus yang lagi marak (ngaku petugas/bank, link palsu, minta OTP/transfer, dll). Kalau valid, saya sebar peringatan ke grup daerahmu setelah ditinjau pengurus.
-4️⃣ *Lapor layanan publik* — jalan rusak, listrik mati, air PDAM, sampah, dll. Saya bantu kirim ke portal resmi (LaporGub untuk wilayah Jawa Tengah).
- 
-Semua jawaban bersumber dari info resmi (.go.id/Kemensos) dan selalu saya cantumkan sumbernya. Saya *tidak* menyimpan data pribadimu. 🙏`;
+export const GREETING = `👋 Halo, aku *WargaAI* dari TemanWarga.
 
+Aku bisa bantuin kamu untuk:
+1️⃣ *JagaWarga* — cek hoaks dan penipuan. Kirim kabar, link, atau foto yang kamu ragukan, nanti aku bantu cek aman/belum pasti/berbahaya.
+2️⃣ *WartaWarga* — sebarin info bansos & program pemerintah terbaru. Contoh: "syarat PKH apa?" atau "ada bansos di daerahku?"
+3️⃣ *LaporWarga* — laporin aduan kamu: penipuan yang lagi marak, layanan publik (jalan rusak, listrik mati, air PDAM, dll), sampai konten internet yang meresahkan.
+
+Semua jawaban bersumber dari info resmi (.go.id/Kemensos) dan selalu aku cantumkan sumbernya. Aku *tidak* menyimpan data pribadimu. 🙏`;
+
+// Nomor menu ini HARUS selaras dgn urutan di GREETING di atas (1=JagaWarga, 2=WartaWarga, 3=LaporWarga)
+// — kalau salah satu diubah tanpa yang lain, angka yang ditekan warga tidak match penjelasan greeting.
 const MENU_SELECTIONS = {
   '1': {
-    aksi: 'info',
-    reply: ({ wilayahLabel }) =>
-      `Silakan, info bansos apa yang ingin Bapak/Ibu tanyakan${wilayahLabel ? ` untuk *${wilayahLabel}*` : ''}?\n\n` +
-      'Contoh: "Syarat PKH apa?" atau "Ada bansos apa di Kab. Banyumas?"',
-  },
-  '2': {
     aksi: 'info',
     reply: () =>
       'Silakan kirim kabar, link, foto, atau pesan yang ingin Bapak/Ibu cek.\n\n' +
       'Nanti saya bantu jelaskan apakah aman, belum pasti, atau berbahaya.',
+  },
+  '2': {
+    aksi: 'info',
+    reply: ({ wilayahLabel }) =>
+      `Silakan, info bansos apa yang ingin Bapak/Ibu tanyakan${wilayahLabel ? ` untuk *${wilayahLabel}*` : ''}?\n\n` +
+      'Contoh: "Syarat PKH apa?" atau "Ada bansos apa di Kab. Banyumas?"',
   },
   '3': {
     aksi: 'lapor',
