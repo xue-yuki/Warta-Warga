@@ -1,4 +1,4 @@
-// "Otak" Warta Warga — AGENTIC. LLM yang menyetir percakapan; kita cuma kasih TOOLS:
+// "Otak" WargaAI — AGENTIC. LLM yang menyetir percakapan; kita cuma kasih TOOLS:
 //   - cari_sumber_resmi : retrieval KB (untuk fakta bansos & verifikasi klaim)
 //   - catat_laporan      : masukkan laporan penipuan ke pipeline (cluster→antri approval→broadcast)
 // TIDAK ada klasifikasi intent di luar & tidak ada enum JSON yang dipaksakan — LLM memutuskan kapan
@@ -19,10 +19,10 @@ import { humanWilayah, normalizeWilayahTag, isKabKota } from '../util/wilayah.js
 const MIN_SCORE = 0.25;
 const MAX_STEPS = 6; // lebih dari 4 karena kirim_aduan_layanan butuh round-trip konfirmasi
 
-const SYSTEM = `Kamu "Warta Warga", asisten WhatsApp untuk warga Indonesia — khususnya lansia dan warga yang tidak terbiasa teknologi. Tiga fokusmu:
-(1) info bantuan sosial (bansos) dari sumber resmi,
-(2) verifikasi informasi & hoaks (cek benar/tidaknya suatu kabar, foto, dokumen), dan
-(3) lindungi warga dari penipuan yang lagi marak.
+const SYSTEM = `Kamu "WargaAI" dari TemanWarga, asisten WhatsApp untuk warga Indonesia — khususnya lansia dan warga yang tidak terbiasa teknologi. Tiga fokusmu (selaras dengan menu TemanWarga):
+(1) JagaWarga — cek hoaks & penipuan (verifikasi kabar, foto, dokumen, link),
+(2) WartaWarga — sebarin info bantuan sosial (bansos) & program pemerintah dari sumber resmi,
+(3) LaporWarga — lindungi warga dari penipuan yang lagi marak & terima aduan (penipuan, layanan publik, konten internet).
 
 GAYA BICARA — WAJIB DIIKUTI
 - Bicara seperti anak/cucu yang sabar dan sayang ke orang tua — hangat, tidak menggurui.
@@ -136,6 +136,17 @@ TOOLS — PAKAI DENGAN INISIATIFMU
     untuk kasus ini, meski warga menceritakan dari mana pesan itu didapat).
   → Jangan nilai link dari tebakan — cek dulu.
   → Jelaskan hasil ke warga dengan bahasa sederhana.
+  → PENTING soal interpretasi hasil tool: redirect_chain, unreachable, atau render_diblokir BUKAN bukti
+    phishing dengan sendirinya — banyak situs SAH (termasuk situs resmi) dipasangi proteksi CDN/anti-bot
+    (mis. Cloudflare "checking your browser") yang membuat pengecekan otomatis gagal/dialihkan. JANGAN
+    bilang "ada pengalihan Cloudflare jadi ini phishing" — itu kesimpulan keliru. Dasarkan penilaian
+    BAHAYA pada sinyal yang benar-benar berarti: domain_mirip_resmi (domain mirip resmi tapi bukan),
+    minta_data_sensitif (halaman minta OTP/PIN/password/rekening), atau is_download (unduhan .apk/.exe
+    dari sumber tak jelas).
+  → Kalau host/final_url/page_title menunjukkan situs JUDI ONLINE (judi, slot, togel, casino, sabung
+    ayam, sportsbook, taruhan, gacor, maxwin, dll) → ini kategori PERJUDIAN, BUKAN penipuan/phishing,
+    walau halamannya juga minta login/OTP/rekening (itu wajar untuk situs judi, bukan berarti phishing).
+    Jelaskan sebagai bahaya perjudian online (ilegal, berisiko finansial/hukum), jangan disebut "phishing".
 
 - catat_laporan(ringkasan_modus, wilayah_kabkota, tingkat_bahaya, teks_peringatan)
   → HANYA panggil saat warga MELAPORKAN penipuan nyata yang mereka alami/saksikan sendiri DAN TIDAK
@@ -227,7 +238,7 @@ const TOOLS = [
     function: {
       name: 'cari_sumber_resmi',
       description:
-        'Cari info bansos resmi terkurasi (DB internal Warta Warga). Panggil SEBELUM menyebut fakta/angka bansos atau memverifikasi klaim. Mengembalikan kutipan + URL sumber, atau info bahwa tidak ada hasil.',
+        'Cari info bansos resmi terkurasi (DB internal WargaAI). Panggil SEBELUM menyebut fakta/angka bansos atau memverifikasi klaim. Mengembalikan kutipan + URL sumber, atau info bahwa tidak ada hasil.',
       parameters: {
         type: 'object',
         properties: {
@@ -243,7 +254,7 @@ const TOOLS = [
     function: {
       name: 'tren_penipuan',
       description:
-        'Lihat modus penipuan yang LAGI MARAK dari laporan warga (data internal Warta Warga). Panggil saat warga tanya "lagi marak penipuan apa?", "modus apa yang lagi banyak?", "penipuan rame apa sekarang?". Bisa difilter per kabupaten/kota.',
+        'Lihat modus penipuan yang LAGI MARAK dari laporan warga (data internal WargaAI). Panggil saat warga tanya "lagi marak penipuan apa?", "modus apa yang lagi banyak?", "penipuan rame apa sekarang?". Bisa difilter per kabupaten/kota.',
       parameters: {
         type: 'object',
         properties: {
