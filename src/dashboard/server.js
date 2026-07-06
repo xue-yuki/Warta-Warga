@@ -7,7 +7,7 @@
 // standalone), approve tetap tercatat tapi penyebaran ditunda (broadcastPeringatan → no-sender).
 
 import express from 'express';
-import { getLaporan, listLaporanApprovedPendingBroadcast, listLaporanPerluVerifikasi, listLaporanSiapBroadcast, parseLaporanSourceUrls, setApprovalLaporan, trendingModus } from '../db/index.js';
+import { getLaporan, listLaporanApprovedPendingBroadcast, listLaporanPerluVerifikasi, listLaporanSiapBroadcast, parseLaporanSourceUrls, setApprovalLaporan, trendingModus, markPeringatanTerkirim } from '../db/index.js';
 import { broadcastPendingPeringatan, broadcastPeringatan, formatPeringatan, hasBroadcaster, URGENT_THRESHOLD, broadcastTrenNasional } from '../agent1/broadcast.js';
 import { generatePeringatanPoster } from '../llm/imageGen.js';
 import { humanWilayah } from '../util/wilayah.js';
@@ -244,6 +244,17 @@ export function createDashboardApp() {
     const repId = Number(ids[0]);
     const laporan = await getLaporan(repId);
     const r = await broadcastPeringatan(laporan, { imagePath }).catch((e) => ({ sent: 0, reason: e.message }));
+
+    // Sibling cluster sudah di-approve bersama representatif — tandai terkirim agar tidak
+    // muncul lagi di pending poller / spam broadcast duplikat.
+    if ((r.sent || 0) > 0) {
+      const grupCount = r.grupCount || r.sent || 0;
+      for (const id of ids) {
+        await markPeringatanTerkirim({ laporanId: Number(id), wilayahTag, grupCount }).catch((e) => {
+          console.warn(`[Cluster] mark terkirim #${id} gagal:`, e?.message);
+        });
+      }
+    }
 
     console.log(`[Cluster] broadcast-cluster wilayah=${wilayahTag} ids=${ids.join(',')} sent=${r.sent} reason=${r.reason || 'ok'} poster=${imagePath || 'none'}`);
     return res.json({ ok: true, sent: r.sent || 0, grupCount: r.grupCount || 0, imagePath: imagePath || null, reason: r.reason });

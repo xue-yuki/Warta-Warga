@@ -19,7 +19,11 @@ const run = async () => {
   show('kemensos.go.id (is_official_gov:true)', await inspectUrl('https://kemensos.go.id'));
 
   // 4) Redirect chain (http→https)
-  show('redirect github (chain terisi)', await inspectUrl('http://github.com'));
+  const gh = await inspectUrl('http://github.com');
+  show('redirect github (chain terisi)', gh);
+  if (gh.ok && !gh.content_snippet && gh.page_title) {
+    console.warn('  ⚠ github: page_title ada tapi content_snippet kosong');
+  }
 
   // 5) Domain mirip resmi tapi bukan .go.id (lookalike)
   show('lookalike (domain_mirip_resmi:true)', await inspectUrl('https://kemensos-bansos-cair.web.id/login'));

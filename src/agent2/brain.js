@@ -13,6 +13,7 @@ import { search } from '../kb/vectorStore.js';
 import { trendingModus } from '../db/index.js';
 import { simpanLaporanTool, humanModus } from './lapor.js';
 import { inspectUrl } from './checkurl.js';
+import { checkClaim } from './claim.js';
 import { submitLaporanLayanan } from './lapor-layanan.js';
 import { humanWilayah, normalizeWilayahTag, isKabKota } from '../util/wilayah.js';
 
@@ -109,6 +110,9 @@ Untuk info BANSOS:
 
 Ingat: bansos resmi TIDAK PERNAH minta transfer uang atau klik link dulu.
 ---
+
+- Kalau pesan mengandung URL/link dan sistem sudah menyertakan KONTEKS LINK (content_snippet/page_title) di pesan sistem → JANGAN minta warga menjelaskan isi linknya; pakai konteks itu + cek_url/cari_sumber_resmi untuk verifikasi.
+- Kalau fetch link gagal total (unreachable/render_diblokir) tanpa snippet → jawab ⚠️ BELUM BISA DIPASTIKAN + saran cek sumber resmi; jangan tanya "apa isi linknya?".
 
 MENANGANI PESAN TIDAK JELAS
 Lansia sering kirim pesan pendek tanpa konteks. Kalau tidak jelas:
@@ -398,24 +402,36 @@ function assertsBansosFact(text) {
  * @returns {Promise<{reply:string, aksi:string, label:null, grounded:boolean}>}
  *   aksi diturunkan dari tool yang dipakai (info/lapor/ngobrol) — hanya untuk routing discovery & log.
  */
-export async function think(text, { history = [], scopeTags = null, wilayahTag = null, sessionId = null } = {}) {
+export async function think(text, { history = [], scopeTags = null, wilayahTag = null, sessionId = null, urlContext = null } = {}) {
   if (!hasLLM()) {
     return { reply: 'Hai! 🙂 Aku bisa bantu info bansos atau cek kabar/laporan penipuan. Mau yang mana?', aksi: 'ngobrol', label: null, grounded: false };
   }
 
   const messages = [{ role: 'system', content: SYSTEM }];
+  const usedSources = new Set();
+  const allowedUrls = new Set();
   if (wilayahTag) {
     messages.push({
       role: 'system',
       content: `Konteks kanal: percakapan ini di grup wilayah ${humanWilayah(wilayahTag)} (tag: ${wilayahTag}). Untuk laporan di sini, pakai wilayah itu tanpa perlu bertanya.`,
     });
   }
+  if (urlContext?.inspection) {
+    const ins = urlContext.inspection;
+    if (ins.input_url) allowedUrls.add(ins.input_url);
+    if (ins.final_url) allowedUrls.add(ins.final_url);
+    let block = `KONTEKS LINK (sudah di-fetch otomatis sebelum jawaban):\n${JSON.stringify(ins)}`;
+    if (urlContext?.klaim_verifikasi) {
+      block += `\n\nHASIL checkClaim terhadap isi link:\n${JSON.stringify(urlContext.klaim_verifikasi)}`;
+      urlContext.klaim_verifikasi.sources?.forEach((u) => usedSources.add(u));
+    }
+    block += '\n\nGunakan data di atas. JANGAN minta warga menjelaskan isi link jika content_snippet atau page_title sudah ada.';
+    messages.push({ role: 'system', content: block });
+  }
   messages.push(...history, { role: 'user', content: text });
 
-  const usedSources = new Set(); // URL sumber resmi (untuk footer "Sumber:")
-  const allowedUrls = new Set(); // URL yang boleh tampil utuh di balasan (sumber ∪ URL yang dicek cek_url)
   let aksi = 'ngobrol';
-  let grounded = false;
+  let grounded = urlContext?.klaim_verifikasi?.label === 'verified' || urlContext?.klaim_verifikasi?.label === 'contradict';
   let searched = false; // apakah cari_sumber_resmi sudah dipanggil giliran ini?
   let nudgedGrounding = false; // penegak grounding hanya sekali (cegah loop)
   let aduanSent = false;   // apakah kirim_aduan_layanan sudah dipanggil
@@ -516,16 +532,19 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
             })
             : 'Belum ada laporan terkumpul untuk dirangkum jadi tren.';
         } else if (tc.function?.name === 'cek_url') {
-          // 'verifikasi', BUKAN 'info' — sama alasannya dgn tren_penipuan di atas. Bug nyata yang ini
-          // perbaiki: cek_url dulu ke-label 'info', jadi warga yang nanya soal link/SMS phishing di
-          // grup dgn wilayah yang KB-nya belum ada data bansos → salah dianggap "nyari bansos wilayah
-          // ini", jawaban asli (verdict link) dibuang, keganti pesan "lagi nyari info bansos...".
           if (aksi !== 'lapor' && aksi !== 'info') aksi = 'verifikasi';
           const r = await inspectUrl(args.url);
-          // Izinkan URL yang dicek tampil utuh di balasan (jangan ke-mangle jadi "[sumber resmi]").
           if (r.input_url) allowedUrls.add(r.input_url);
           if (r.final_url) allowedUrls.add(r.final_url);
-          result = JSON.stringify(r);
+          const claimSrc = r.content_snippet || r.page_title || r.meta_description;
+          let klaim_verifikasi = null;
+          if (claimSrc && String(claimSrc).length >= 15) {
+            const c = await checkClaim(String(claimSrc).slice(0, 500), { scopeTags });
+            klaim_verifikasi = { label: c.label, judul: c.judul, alasan: c.alasan, sources: c.sources };
+            if (c.label === 'verified' || c.label === 'contradict') grounded = true;
+            c.sources?.forEach((u) => usedSources.add(u));
+          }
+          result = JSON.stringify({ ...r, klaim_verifikasi });
         } else if (tc.function?.name === 'catat_laporan') {
           aksi = 'lapor';
           const toolResult = await simpanLaporanTool({ ...args, wilayahTagGrup: wilayahTag, scopeTags });

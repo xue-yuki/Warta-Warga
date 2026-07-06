@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   laporan_id   INTEGER REFERENCES laporan(id) ON DELETE CASCADE,
   wilayah_tag  TEXT,
   grup_count   INTEGER,
-  timestamp    TEXT NOT NULL
+  timestamp    TEXT NOT NULL,
+  UNIQUE(laporan_id)
 );
 
 -- Pola regex host yang diizinkan Agent 1 (menggantikan data/sources_whitelist.json).

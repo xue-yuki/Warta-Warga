@@ -51,6 +51,11 @@ function sqliteDb() {
   _sqlite.pragma('foreign_keys = ON');
   _sqlite.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   for (const [table, col, type] of COLUMN_MIGRATIONS) ensureColumn(_sqlite, table, col, type);
+  try {
+    _sqlite.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_peringatan_terkirim_laporan ON peringatan_terkirim(laporan_id)');
+  } catch {
+    /* index may already exist from schema UNIQUE */
+  }
   return _sqlite;
 }
 
@@ -73,6 +78,11 @@ async function pgInit() {
     }
   }
   await ensurePgVector(_pg);
+  try {
+    await _pg.unsafe('CREATE UNIQUE INDEX IF NOT EXISTS idx_peringatan_terkirim_laporan ON peringatan_terkirim(laporan_id)');
+  } catch {
+    /* laporan_id may already be UNIQUE via column constraint */
+  }
   return _pg;
 }
 
@@ -442,9 +452,15 @@ export async function findSimilarClusterLaporan({ modusKey, wilayahTag, status, 
       : null;
 
     if (queryVec && rowVec) {
-      score = cosine(queryVec, rowVec);
-      reason = 'cosine';
-      if (score < COSINE_THRESHOLD) continue;
+      if (queryVec.length !== rowVec.length) {
+        score = textSimilarity(isiRingkas, row.isi_ringkas);
+        reason = 'similar_text';
+        if (score < threshold) continue;
+      } else {
+        score = cosine(queryVec, rowVec);
+        reason = 'cosine';
+        if (score < COSINE_THRESHOLD) continue;
+      }
     } else {
       score = textSimilarity(isiRingkas, row.isi_ringkas);
       reason = 'similar_text';
@@ -821,11 +837,11 @@ export async function markPeringatanTerkirim({ laporanId, wilayahTag, grupCount 
   await initDb();
   const ts = new Date().toISOString();
   if (hasSupabase()) {
-    await _pg`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (${laporanId}, ${wilayahTag || null}, ${grupCount ?? 0}, ${ts})`;
+    await _pg`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (${laporanId}, ${wilayahTag || null}, ${grupCount ?? 0}, ${ts}) ON CONFLICT (laporan_id) DO NOTHING`;
     return;
   }
   sq()
-    .prepare(`INSERT INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (?, ?, ?, ?)`)
+    .prepare(`INSERT OR IGNORE INTO peringatan_terkirim (laporan_id, wilayah_tag, grup_count, timestamp) VALUES (?, ?, ?, ?)`)
     .run(laporanId, wilayahTag || null, grupCount ?? 0, ts);
 }
 

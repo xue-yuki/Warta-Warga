@@ -8,8 +8,9 @@ import { insertLaporanLayanan, updateLaporanLayananStatus, insertLaporanLayananS
 import { submitLaporGub } from "../portal/laporgub.js";
 import { submitAduanKonten, ADUANKONTEN_CATEGORIES } from "../portal/aduankonten.js";
 import { matchScamPattern } from "./lapor.js";
+import { isVerificationIntent, isReportIntent } from "./intent.js";
 
-const SERVICE_KEYWORDS = /\b(lapor|aduan|pengaduan|adukan|rusak|mati listrik|mati air|jalan rusak|jalan berlubang|sampah|pdam|pln|listrik|air|jalan|kebersihan|fasilitas umum|lampu jalan|banjir|konten|situs|website|web|hoaks|hoax|pornografi|judi|penipuan online|sara|terorisme|radikalisme)\b/i;
+const SERVICE_KEYWORDS = /\b(lapor|aduan|pengaduan|adukan|rusak|mati listrik|mati air|jalan rusak|jalan berlubang|sampah|pdam|pln|listrik|air|jalan|kebersihan|fasilitas umum|lampu jalan|banjir|konten|situs|website|web|pornografi|judi|penipuan online|sara|terorisme|radikalisme)\b/i;
 const PUBLIC_SERVICE_SUBJECTS = /\b(jalan|sampah|pdam|pln|listrik|air|kebersihan|fasilitas umum|lampu jalan|trotoar|saluran|drainase|jembatan|penerangan)\b/i;
 const PUBLIC_SERVICE_PROBLEMS = /\b(rusak|berlubang|mati|padam|tidak\s+keluar|keruh|bocor|mampet|banjir|menumpuk|gelap|longsor|macet|patah|amblas|terputus|perlu\s+diperbaiki|tolong\s+diperbaiki)\b/i;
 const REPORT_INTENT = /\b(lapor|aduan|pengaduan|adukan|ngadu|tolong|mohon)\b/i;
@@ -120,9 +121,11 @@ export function hasPendingLaporanLayanan(sessionId) {
 
 function isServiceReportIntent(text) {
   if (!text) return false;
+  // Pertanyaan verifikasi hoaks/link — brain (JagaWarga), bukan intercept aduan.
+  if (isVerificationIntent(text) && !isReportIntent(text)) return false;
   if (!SERVICE_KEYWORDS.test(text)) return false;
-  // Cek fraud patterns dari lapor.js (lebih komprehensif dari regex FRAUD_KEYWORDS)
-  // Kalau teks mengandung pola penipuan → biarkan brain.js yang handle
+  // Keyword konten/situs tanpa niat lapor eksplisit → biarkan brain verifikasi dulu.
+  if (KONTEN_KEYWORDS.test(text) && !isReportIntent(text)) return false;
   if (FRAUD_KEYWORDS.test(text)) return false;
   if (matchScamPattern(text)) return false;
   return true;

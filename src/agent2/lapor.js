@@ -265,14 +265,17 @@ export async function simpanLaporanTool({ ringkasan_modus, wilayah_kabkota, ting
     return { ok: false, alasan: 'wilayah_belum_spesifik', pesan: 'Wilayah belum spesifik kabupaten/kota. Tanya warga dulu kab/kota kejadiannya, jangan catat dulu.' };
   }
 
-  const status = ['jelas_penipuan', 'belum_pasti', 'bukan_penipuan'].includes(tingkat_bahaya) ? tingkat_bahaya : 'belum_pasti';
+  let status = ['jelas_penipuan', 'belum_pasti', 'bukan_penipuan'].includes(tingkat_bahaya) ? tingkat_bahaya : 'belum_pasti';
   // Saring PII SEBELUM disimpan/disebar (jaring pengaman; modus_key dideteksi dari teks yang sudah bersih).
   const isiRingkas = scrubPII(String(ringkasan_modus || '').slice(0, 300)) || 'Laporan modus penipuan dari warga.';
   const teksPeringatan = scrubPII(String(teks_peringatan || '').trim()) || FALLBACK_PERINGATAN;
   const modusKey = matchScamPattern(isiRingkas) || 'lainnya';
 
-  // Cluster by exact modus first, then similar text. Tool reports do not carry source URLs,
-  // so they stay in the "perlu verifikasi" dashboard section until reviewed.
+  const verify = await checkClaim(isiRingkas, { scopeTags: null }).catch(() => null);
+  if (verify?.label === 'contradict' && status === 'jelas_penipuan') {
+    status = 'belum_pasti';
+  }
+
   const existing = await findSimilarClusterLaporan({ modusKey, wilayahTag, status, isiRingkas });
   let laporan;
   let clustered = false;

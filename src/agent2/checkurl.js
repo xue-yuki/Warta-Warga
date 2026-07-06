@@ -8,7 +8,7 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { isWhitelisted } from '../agent1/fetch.js';
+import { isWhitelisted, cleanHtml } from '../agent1/fetch.js';
 import { hasBrowser, browserFetch } from '../agent1/browser.js';
 import { bdUnlock } from '../agent1/brightdata.js';
 import { hasBrightDataUnlocker } from '../config.js';
@@ -21,7 +21,32 @@ const MAX_HOPS = 6;
 const SENS_FIELD = /\b(otp|pin|nik|no_?kk|sandi|password|passwd|pwd|cvv|cvc|rekening|m-?pin|kode_?verif|login|user(name)?)\b/i;
 const BRAND = /(kemensos|bansos|pkh|bpnt|sembako|bsu|prakerja|dtks|dana|gopay|ovo|shopee|bri|bca|bni|mandiri|gov)/i;
 const DL_EXT = /\.(apk|apks|exe|msi|zip|rar|scr|bat)$/i;
-const DL_CT = /(application\/vnd\.android\.package-archive|application\/octet-stream|application\/x-msdownload|application\/zip)/i;
+const DL_CT = /application\/(octet-stream|vnd\.android\.package-archive|x-msdownload|zip|x-executable)|binary/i;
+const SNIPPET_MAX = 1500;
+
+export const URL_RE = /\b(?:https?:\/\/[^\s<>"'`]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"'`]*)?)/i;
+
+/** Ekstrak URL pertama dari teks pesan warga. */
+export function extractUrlFromText(text) {
+  const match = String(text || '').match(URL_RE);
+  if (!match) return null;
+  return String(match[0]).trim().replace(/[)\].,;!?]+$/g, '');
+}
+
+function metaDescription($) {
+  const og = $('meta[property="og:description"]').attr('content') || $('meta[name="description"]').attr('content');
+  return String(og || '').trim().slice(0, 400) || null;
+}
+
+function articleSnippet(html) {
+  try {
+    const { text, title } = cleanHtml(html);
+    const snippet = String(text || '').replace(/\s+/g, ' ').trim().slice(0, SNIPPET_MAX);
+    return { content_snippet: snippet || null, page_title: title?.slice(0, 160) || null };
+  } catch {
+    return { content_snippet: null, page_title: null };
+  }
+}
 
 /** Normalisasi URL bebas → absolut http(s). null bila skema lain / tak valid. */
 function normalize(raw) {
@@ -159,10 +184,13 @@ async function finalize({ input_url, final_url, redirect_chain, headers, body, f
     input_url,
     final_url,
     redirect_chain,
+    fetch_status: 'ok',
     ...dom,
     is_download,
     download_type: is_download ? (extOf(final_url).replace('.', '') || ct || 'tidak diketahui') : null,
     page_title: null,
+    content_snippet: null,
+    meta_description: null,
     minta_data_sensitif: false,
     field_mencurigakan: [],
   };
@@ -171,12 +199,15 @@ async function finalize({ input_url, final_url, redirect_chain, headers, body, f
   return base;
 }
 
-/** Ekstrak sinyal dari HTML (cheerio, TANPA eksekusi JS): judul + field minta data sensitif. */
+/** Ekstrak sinyal dari HTML (cheerio, TANPA eksekusi JS): judul, snippet artikel, field sensitif. */
 function scanHtml(html) {
-  const out = { page_title: null, minta_data_sensitif: false, field_mencurigakan: [] };
+  const out = { page_title: null, content_snippet: null, meta_description: null, minta_data_sensitif: false, field_mencurigakan: [] };
   try {
     const $ = cheerio.load(html);
-    out.page_title = ($('title').first().text() || $('h1').first().text() || '').trim().slice(0, 160) || null;
+    const article = articleSnippet(html);
+    out.page_title = ($('title').first().text() || $('h1').first().text() || article.page_title || '').trim().slice(0, 160) || null;
+    out.meta_description = metaDescription($);
+    out.content_snippet = article.content_snippet || out.meta_description || out.page_title;
     const fields = new Set();
     $('input, select, textarea').each((_, el) => {
       const type = String($(el).attr('type') || '').toLowerCase();
@@ -197,7 +228,7 @@ const RENDER_TIMEOUT = 18000; // batas keras: situs normal kelar ~2-5s; situs an
 
 function hasUsefulContent(html) {
   const s = scanHtml(html);
-  return Boolean(s.page_title) || s.minta_data_sensitif;
+  return Boolean(s.page_title || s.content_snippet) || s.minta_data_sensitif;
 }
 
 /**
@@ -227,15 +258,20 @@ function shouldRender(r) {
   if (r.is_official_gov) return false; // Bright Data memblokir domain .go.id
   if (r.is_download) return false;
   if (!(hasBrowser() || hasBrightDataUnlocker())) return false;
-  return r.unreachable === true || (r.ok === true && !r.page_title);
+  return r.unreachable === true || (r.ok === true && !r.page_title && !r.content_snippet);
+}
+
+function withFetchStatus(result) {
+  if (result.render_diblokir) return { ...result, fetch_status: 'render_diblokir' };
+  if (result.unreachable || result.ok === false) return { ...result, fetch_status: 'unreachable' };
+  return { ...result, fetch_status: result.fetch_status || 'ok' };
 }
 
 /** Bila scan statis tipis, coba render remote (Bright Data) lalu pindai ulang. */
 async function augment(result) {
-  if (!shouldRender(result) || !result.final_url) return result;
+  if (!shouldRender(result) || !result.final_url) return withFetchStatus(result);
   const html = await renderViaBrightData(result.final_url);
-  // Render dicoba tapi gagal (timeout/anti-bot) → tandai: situs menyulitkan pemeriksaan = sinyal curiga.
-  if (!html) return { ...result, render_diblokir: true };
+  if (!html) return withFetchStatus({ ...result, render_diblokir: true });
   const merged = await finalize({
     input_url: result.input_url,
     final_url: result.final_url,
@@ -244,5 +280,5 @@ async function augment(result) {
     body: html,
   });
   merged.via = 'brightdata-render';
-  return merged;
+  return withFetchStatus(merged);
 }

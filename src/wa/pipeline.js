@@ -18,6 +18,7 @@ import { respondToMessage, GREETING } from "../agent2/handler.js";
 import { handleLaporKonten, maybeOfferAduanKontenReport, rememberAduanKontenUrlFromText } from "../agent2/lapor-konten.js";
 import { handleAduanKontenStatus } from "../agent2/aduankonten-status.js";
 import { handleLaporLayanan, hasPendingLaporanLayanan, storeImageForSession } from "../agent2/lapor-layanan.js";
+import { isImageOnlyVerificationDefault } from "../agent2/intent.js";
 import { groupScopeTags, normalizeWilayahTag, inferProvinsiTag, detectWilayahFromText, isKabKota, humanWilayah, validateWilayahExists } from "../util/wilayah.js";
 import { scrapeRegion } from "../agent1/scheduler.js";
 import { config, hasSearch } from "../config.js";
@@ -258,10 +259,12 @@ export async function handleContent(adapter, jid, { text, konteks, scopeTags, wi
     storeImageForSession(sessionId, { imageBuffer, imageMimetype, imageText });
   }
 
-  // Untuk gambar tanpa teks: tangkap dulu di lapor-layanan agar buffer tersimpan di pending state,
-  // menunggu teks penjelasan dari warga. Pesan teks biasa langsung ke brain (tidak perlu keyword matching).
+  // Gambar tanpa caption: default ke verifikasi hoaks (brain), bukan alur aduan layanan.
+  // Hanya intercept lapor-layanan jika OCR/caption jelas niat lapor (lapor/aduan/...).
   if (imageBuffer && !text) {
-    if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
+    if (!isImageOnlyVerificationDefault({ text, imageText })) {
+      if (await handleLayananWithTyping({ text, imageText, imageBuffer, imageMimetype, sessionId, messageId })) return;
+    }
   }
 
   // Cek pending image state (warga sedang menunggu konfirmasi setelah kirim gambar)

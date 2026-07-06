@@ -95,32 +95,49 @@ export async function scrapeAllSources({ reason = 'manual' } = {}) {
   return { total: sources.length, ok, skip };
 }
 
-/** Aktifkan penjadwal: scrape saat boot (opsional) + interval berkala. Non-blocking. */
+/** Aktifkan penjadwal: scrape (opsional) + Komdigi hoaks + pending broadcast. Non-blocking. */
 export function startIngestScheduler() {
-  if (!config.scrape.enabled) {
-    console.log('[Agent1] Auto-scrape NONAKTIF (SCRAPE_AUTO=false).');
-    return;
-  }
-  if (!hasLLM()) {
-    console.warn('[Agent1] Auto-scrape dilewati: OPENROUTER_API_KEY belum diset.');
+  const scrapeEnabled = config.scrape.enabled;
+  const komdigiEnabled = hasLLM();
+
+  if (!scrapeEnabled && !komdigiEnabled) {
+    console.log('[Agent1] Auto-scrape & Komdigi NONAKTIF (SCRAPE_AUTO=false, tanpa LLM).');
     return;
   }
 
-  if (config.scrape.onBoot) {
-    // jalan di latar belakang, jangan blokir start bot.
+  if (!scrapeEnabled) {
+    console.log('[Agent1] Auto-scrape NONAKTIF (SCRAPE_AUTO=false) — Komdigi hoaks tetap dijadwalkan.');
+  } else if (!komdigiEnabled) {
+    console.warn('[Agent1] Komdigi dilewati: OPENROUTER_API_KEY belum diset.');
+  }
+
+  const intervalMs = Math.max(1, config.scrape.intervalHours) * 60 * 60 * 1000;
+
+  if (scrapeEnabled && komdigiEnabled && config.scrape.onBoot) {
     scrapeAllSources({ reason: 'startup' }).catch((e) => console.warn('[Agent1] scrape startup gagal:', e.message));
   }
+  if (komdigiEnabled) {
+    ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] startup gagal:', e.message));
+  }
 
-  // Komdigi hoaks selalu diingest saat bot start (PDF harian kecil, bukan crawl besar).
-  ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] startup gagal:', e.message));
+  if (scrapeEnabled && komdigiEnabled) {
+    console.log(`[Agent1] ⏱️  Auto-scrape aktif tiap ${config.scrape.intervalHours} jam.`);
+  }
+  if (komdigiEnabled) {
+    console.log('[Komdigi] ⏱️  Ingest hoaks harian aktif.');
+  }
 
-  const ms = Math.max(1, config.scrape.intervalHours) * 60 * 60 * 1000;
-  _timer = setInterval(() => {
-    scrapeAllSources({ reason: 'terjadwal' }).catch((e) => console.warn('[Agent1] scrape terjadwal gagal:', e.message));
-    ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] terjadwal gagal:', e.message));
-  }, ms);
-  _timer.unref?.(); // jangan menahan proses tetap hidup hanya karena timer
-  console.log(`[Agent1] ⏱️  Auto-scrape aktif tiap ${config.scrape.intervalHours} jam.`);
+  if (scrapeEnabled || komdigiEnabled) {
+    _timer = setInterval(() => {
+      if (scrapeEnabled && komdigiEnabled) {
+        scrapeAllSources({ reason: 'terjadwal' }).catch((e) => console.warn('[Agent1] scrape terjadwal gagal:', e.message));
+      }
+      if (komdigiEnabled) {
+        ingestKomdigiHoaks().catch((e) => console.warn('[Komdigi] terjadwal gagal:', e.message));
+      }
+    }, intervalMs);
+    _timer.unref?.();
+  }
 
   if (config.pendingBroadcast.autoPolling) {
     const minutes = Math.max(1, config.pendingBroadcast.intervalMinutes);

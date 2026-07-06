@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS laporan (
 
 CREATE TABLE IF NOT EXISTS peringatan_terkirim (
   id          SERIAL PRIMARY KEY,
-  laporan_id  INTEGER REFERENCES laporan(id) ON DELETE CASCADE,
+  laporan_id  INTEGER REFERENCES laporan(id) ON DELETE CASCADE UNIQUE,
   wilayah_tag TEXT,
   grup_count  INTEGER,
   timestamp   TEXT NOT NULL

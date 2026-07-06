@@ -22,11 +22,24 @@ import { formatTanggalID, isExpiredDate, masaBerlakuNotice } from '../util/tangg
 // dan TIDAK ditandai terkirim, sehingga putaran berikutnya (saat bot hidup) tetap mengabarkan.
 let _sender = null;
 const _peringatanInFlight = new Set();
-export function setBroadcaster(fn) {
+let _kirimiTransport = false;
+let _kirimiDeviceOnline = false;
+
+export function setBroadcaster(fn, { transport = 'baileys' } = {}) {
   _sender = typeof fn === 'function' ? fn : null;
+  _kirimiTransport = transport === 'kirimi';
+  if (!_kirimiTransport) _kirimiDeviceOnline = true;
 }
+
+/** Dipanggil dari kirimi webhook setelah cek device-status API. */
+export function setKirimiDeviceOnline(online) {
+  _kirimiDeviceOnline = Boolean(online);
+}
+
 export function hasBroadcaster() {
-  return Boolean(_sender);
+  if (!_sender) return false;
+  if (_kirimiTransport) return _kirimiDeviceOnline;
+  return true;
 }
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));

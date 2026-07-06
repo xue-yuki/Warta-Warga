@@ -22,9 +22,9 @@ import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
 import { setAduanKontenNotifier } from "../agent2/aduankonten-checker.js";
 import { startAgent2ServiceCheckers } from "../agent2/layanan-checker.js";
 import { describeImage } from "../agent2/vision.js";
-import { setBroadcaster, broadcastPendingPeringatan } from "../agent1/broadcast.js";
+import { setBroadcaster, broadcastPendingPeringatan, setKirimiDeviceOnline } from "../agent1/broadcast.js";
 import { alreadySeen, isStartCommand, handleGroup, handleJapri } from "./pipeline.js";
-import { kirimiSendMessage } from "./kirimiClient.js";
+import { kirimiSendMessage, kirimiDeviceStatus } from "./kirimiClient.js";
 
 const POSTERS_DIR = path.join(ROOT, "data", "posters");
 
@@ -207,7 +207,20 @@ export function startKirimiWebhookServer(port = config.kirimi.webhookPort) {
   // Broadcaster untuk Agent 1 (info baru) + dashboard cluster/pending broadcast.
   setBroadcaster(async (jid, text, imagePath = null) => {
     return kirimiSendMessage({ to: jid, message: text, mediaUrl: publicMediaUrl(imagePath) });
-  });
+  }, { transport: 'kirimi' });
+
+  async function refreshKirimiDeviceOnline() {
+    try {
+      const data = await kirimiDeviceStatus();
+      const online = /connected|online|active|ready/i.test(String(data?.status || data?.device_status || data?.message || ''));
+      setKirimiDeviceOnline(online);
+    } catch (e) {
+      setKirimiDeviceOnline(false);
+      console.warn('[kirimi] device-status gagal:', e?.message);
+    }
+  }
+  refreshKirimiDeviceOnline();
+  setInterval(refreshKirimiDeviceOnline, 60_000).unref?.();
   setLaporgubNotifier((jid, text) => kirimiSendMessage({ to: jid, message: text }));
   setAduanKontenNotifier((jid, text) => kirimiSendMessage({ to: jid, message: text }));
   startAgent2ServiceCheckers();

@@ -16,7 +16,7 @@ async function getLocalExtractor() {
   return _extractor;
 }
 
-const HASH_DIM = 512;
+const HASH_DIM = 384; // selaras EMBEDDING_DIM di db/index.js (Xenova/all-MiniLM-L6-v2)
 
 function hashingEmbed(text) {
   const vec = new Float32Array(HASH_DIM);
@@ -70,8 +70,8 @@ export async function embedMany(texts) {
 }
 
 export function cosine(a, b) {
-  const n = Math.min(a.length, b.length);
+  if (!a?.length || !b?.length || a.length !== b.length) return -1;
   let dot = 0;
-  for (let i = 0; i < n; i++) dot += a[i] * b[i];
-  return dot; // vektor sudah dinormalisasi
+  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+  return dot;
 }

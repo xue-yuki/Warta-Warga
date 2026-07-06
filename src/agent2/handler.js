@@ -8,6 +8,38 @@ import { getHistory, pushTurn } from './convo.js';
 import { isInjection, isOffTopicTask, looksLikeCode, REFUSAL_REPLY } from './guard.js';
 import { humanWilayah } from '../util/wilayah.js';
 import { consumeLaporReply, handleLapor } from './lapor.js';
+import { extractUrlFromText, inspectUrl } from './checkurl.js';
+import { checkClaim } from './claim.js';
+import { isVerificationIntent } from './intent.js';
+
+async function prefetchUrlContext(text, scopeTags) {
+  const url = extractUrlFromText(text);
+  if (!url) return null;
+  try {
+    const inspection = await inspectUrl(url);
+    const claimSrc = inspection.content_snippet || inspection.page_title || inspection.meta_description;
+    let klaim_verifikasi = null;
+    if (claimSrc && String(claimSrc).length >= 15) {
+      const c = await checkClaim(String(claimSrc).slice(0, 500), { scopeTags });
+      klaim_verifikasi = { label: c.label, judul: c.judul, alasan: c.alasan, sources: c.sources };
+    }
+    return { inspection, klaim_verifikasi };
+  } catch {
+    return null;
+  }
+}
+
+async function prefetchVerificationContext(text, scopeTags) {
+  const urlCtx = await prefetchUrlContext(text, scopeTags);
+  if (urlCtx) return urlCtx;
+  if (!isVerificationIntent(text) || String(text).length < 20) return null;
+  try {
+    const c = await checkClaim(String(text).slice(0, 500), { scopeTags });
+    return { klaim_verifikasi: { label: c.label, judul: c.judul, alasan: c.alasan, sources: c.sources } };
+  } catch {
+    return null;
+  }
+}
 
 export const GREETING = `👋 Halo, aku *WargaAI* dari TemanWarga.
 
@@ -36,8 +68,11 @@ const MENU_SELECTIONS = {
   '3': {
     aksi: 'lapor',
     reply: ({ wilayahLabel }) =>
-      `Silakan ceritakan penipuan yang ingin Bapak/Ibu laporkan${wilayahLabel ? ` di *${wilayahLabel}*` : ''}.\n\n` +
-      'Cukup ceritakan modusnya, misalnya: "ada yang mengaku polisi mengirim file APK" atau "ada yang minta OTP/transfer".\n' +
+      `Silakan ceritakan aduan yang ingin Bapak/Ibu laporkan${wilayahLabel ? ` di *${wilayahLabel}*` : ''}.\n\n` +
+      'Bisa berupa:\n' +
+      '• *Penipuan* yang lagi marak (modusnya seperti apa)\n' +
+      '• *Layanan publik* (jalan rusak, listrik mati, air PDAM, dll)\n' +
+      '• *Konten internet* yang meresahkan (sertakan link-nya)\n\n' +
       'Tidak perlu sebut nama, nomor HP, NIK, atau alamat lengkap.',
   },
 };
@@ -115,8 +150,9 @@ export async function respondToMessage({ text, konteks, scopeTags = null, wilaya
   // apakah ini laporan penipuan (catat_laporan) atau aduan layanan publik (kirim_aduan_layanan).
   // Tidak ada pre-filter deterministik di sini untuk menghindari false positive.
 
-  const history = getHistory(sessionId); // ingatan obrolan efemeral (RAM) → multi-turn natural
-  const r = await think(text, { history, scopeTags, wilayahTag, sessionId });
+  const history = getHistory(sessionId);
+  const urlContext = await prefetchVerificationContext(text, scopeTags);
+  const r = await think(text, { history, scopeTags, wilayahTag, sessionId, urlContext });
 
   // LAPIS 4 (output guard): balasan tak boleh memuat kode (jaring akhir bila injeksi lolos).
   let reply = r.reply;
