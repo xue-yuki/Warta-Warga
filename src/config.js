@@ -143,25 +143,8 @@ export const config = {
     botJid: process.env.BOT_JID || "",
   },
 
-  // Transport WhatsApp aktif: 'kirimi' (default, hosted gateway) atau 'baileys' (fallback,
-  // koneksi langsung + scan QR). Lihat src/index.js untuk pencabangan startup-nya.
   waTransport: (process.env.WA_TRANSPORT || "kirimi").toLowerCase(),
 
-  // kirimi.id: REST API untuk kirim pesan (send-message/broadcast-message) + webhook untuk
-  // terima pesan masuk. user_code/secret didaftarkan lewat dashboard kirimi.id.
-  kirimi: {
-    baseUrl: process.env.KIRIMI_API_BASE_URL || "https://api.kirimi.id",
-    userCode: process.env.USER_CODE || "",
-    secretKey: process.env.KIRIMI_SECRET_KEY || "",
-    deviceId: process.env.KIRIMI_DEVICE_ID || "",
-    botNumber: (process.env.KIRIMI_BOT_NUMBER || "").replace(/\D/g, ""),
-    webhookToken: process.env.KIRIMI_WEBHOOK_TOKEN || "",
-    webhookPort: Number(process.env.KIRIMI_WEBHOOK_PORT || 3220),
-    webhookDebug: (process.env.KIRIMI_WEBHOOK_DEBUG ?? "false") === "true",
-  },
-
-  // Origin publik dipakai untuk membangun URL media (poster) yang dikirim ke kirimi.id,
-  // karena kirimi mengirim media lewat media_url, bukan upload buffer.
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, ""),
 
   defaultWilayahTag: process.env.DEFAULT_WILAYAH_TAG || "nasional",
