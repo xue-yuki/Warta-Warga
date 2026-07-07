@@ -160,6 +160,7 @@ export async function startBot() {
 
   let closedHandled = false; // satu socket → satu penanganan close
   sock.ev.on("connection.update", (u) => {
+    if (sock !== _currentSock) return;
     const { connection, lastDisconnect, qr } = u;
     if (qr) {
       // QR tidak lagi dicetak di terminal — scan lewat dashboard web (GET /wa/status) saja.
