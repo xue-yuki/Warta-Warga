@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import pino from "pino";
 import QRCode from "qrcode";
-import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage } from "@whiskeysockets/baileys";
+import makeWASocket, { fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage } from "@whiskeysockets/baileys";
+import { useDeferredMultiFileAuthState } from "./deferredAuthState.js";
 import { config, hasVision } from "../config.js";
 import { getGrup } from "../db/index.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
@@ -143,7 +144,7 @@ export async function startBot() {
   _connecting = true;
   setBaileysStatus("connecting");
 
-  const { state, saveCreds } = await useMultiFileAuthState(config.wa.authDir);
+  const { state, saveCreds } = await useDeferredMultiFileAuthState(config.wa.authDir);
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
