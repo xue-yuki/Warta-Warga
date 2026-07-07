@@ -4,6 +4,10 @@ import { BufferJSON, initAuthCreds, useMultiFileAuthState } from "@whiskeysocket
 
 const fixFileName = (file) => file?.replace(/\//g, "__")?.replace(/:/g, "-");
 
+export async function resetDeferredAuthState(folder) {
+  await fs.promises.rm(folder, { recursive: true, force: true });
+}
+
 export async function useDeferredMultiFileAuthState(folder) {
   const credsPath = path.join(folder, "creds.json");
   const alreadyLinked = await fs.promises
