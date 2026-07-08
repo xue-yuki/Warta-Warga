@@ -2,8 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pino from "pino";
 import QRCode from "qrcode";
-import makeWASocket, { fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage } from "@whiskeysockets/baileys";
-import { resetDeferredAuthState, useDeferredMultiFileAuthState } from "./deferredAuthState.js";
+import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, jidNormalizedUser, downloadMediaMessage } from "@whiskeysockets/baileys";
 import { config, hasVision } from "../config.js";
 import { getGrup } from "../db/index.js";
 import { setLaporgubNotifier } from "../agent2/laporgub-checker.js";
@@ -14,38 +13,22 @@ import { setBroadcaster, broadcastPendingPeringatan } from "../agent1/broadcast.
 import { alreadySeen, isStartCommand, isRegisteredTarget, startUsage, handleGroup, handleJapri } from "./pipeline.js";
 import { setBaileysStatus } from "./status.js";
 
+// Fallback transport (WA_TRANSPORT=baileys): koneksi Baileys langsung + scan QR sendiri.
+// Transport default sekarang kirimi.id (lihat src/wa/kirimiWebhook.js) — file ini dipertahankan
+// agar mudah kembali ke koneksi langsung tanpa menulis ulang apa pun (env WA_TRANSPORT=baileys).
+// Logika PRODUK (registrasi, brain, aduan konten, lapor layanan, on-demand discovery) sudah
+// dipindah ke src/wa/pipeline.js supaya sama persis dipakai kedua transport.
+
+// Single-flight reconnect: cegah banyak socket bertumpuk (akar penyebab badai code 440).
 let _connecting = false;
 let _reconnectTimer = null;
 let _pendingBroadcastTimer = null;
-let _qrRescanTimer = null;
 let _currentSock = null;
-const QR_RESCAN_DELAY_MS = 15_000;
+// true kalau admin mematikan bot lewat dashboard (POST /wa/stop) — jangan auto-reconnect
+// selama flag ini menyala, supaya "matikan bot" beneran diam sampai dinyalakan lagi manual.
 let _manuallyOff = false;
 
-/** Timestamp ISO untuk tiap baris log supaya jarak antar-event bisa dilacak di production. */
-function ts() {
-  return new Date().toISOString();
-}
-function tlog(...args) {
-  console.log(`[${ts()}]`, ...args);
-}
-function twarn(...args) {
-  console.warn(`[${ts()}]`, ...args);
-}
-
-/** Ringkas objek lastDisconnect (Boom error) jadi satu baris log yang informatif. */
-function describeDisconnect(lastDisconnect) {
-  const err = lastDisconnect?.error;
-  const statusCode = err?.output?.statusCode;
-  const payload = err?.output?.payload;
-  return JSON.stringify({
-    statusCode,
-    message: err?.message,
-    payload,
-    stack: err?.stack ? String(err.stack).split("\n").slice(0, 3).join(" | ") : undefined,
-  });
-}
-
+// Error transien libsignal/kirim-saat-tutup tidak boleh mematikan proses bot.
 let _guardsInstalled = false;
 function installProcessGuards() {
   if (_guardsInstalled) return;
@@ -63,10 +46,10 @@ function installProcessGuards() {
     originalConsoleError(...args);
   };
   process.on("unhandledRejection", (err) => {
-    twarn("[bot] unhandledRejection diabaikan:", err?.message || err, err?.stack ? `\n${err.stack}` : "");
+    console.warn("[bot] unhandledRejection diabaikan:", err?.message || err);
   });
   process.on("uncaughtException", (err) => {
-    twarn("[bot] uncaughtException diabaikan:", err?.message || err, err?.stack ? `\n${err.stack}` : "");
+    console.warn("[bot] uncaughtException diabaikan:", err?.message || err);
   });
 }
 
@@ -96,6 +79,12 @@ function userPart(jid) {
     .split(":")[0];
 }
 
+/**
+ * Deteksi mention bot. Tahan terhadap:
+ * - device suffix (:12), domain beda (@s.whatsapp.net vs @lid)
+ * - identitas bot berupa nomor HP ATAU LID
+ * - balasan (reply) ke pesan bot
+ */
 function isMentioned(msg, sock) {
   const m = unwrap(msg.message);
   // Mention bisa ada di teks biasa ATAU di caption gambar/video.
@@ -140,127 +129,48 @@ function baileysAdapter(sock) {
   };
 }
 
-function clearQrRescanTimer() {
-  if (_qrRescanTimer) {
-    clearTimeout(_qrRescanTimer);
-    _qrRescanTimer = null;
-  }
-}
-
 function scheduleReconnect(delayMs = 3000) {
-  if (_reconnectTimer) {
-    twarn(`[bot] scheduleReconnect diabaikan: timer sudah berjalan (delay=${delayMs}ms).`);
-    return; // sudah ada reconnect yang dijadwalkan
-  }
-  tlog(`[bot] scheduleReconnect: reconnect dijadwalkan dalam ${delayMs}ms. _connecting=${_connecting} _currentSock=${!!_currentSock}`);
+  if (_reconnectTimer) return; // sudah ada reconnect yang dijadwalkan
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null;
-    tlog("[bot] scheduleReconnect: timer fired, memanggil startBot()...");
-    startBot().catch((e) => twarn("[bot] reconnect gagal:", e?.message, e?.stack ? `\n${e.stack}` : ""));
-  }, delayMs);
-}
-
-function scheduleQrRescan(delayMs = QR_RESCAN_DELAY_MS) {
-  if (_qrRescanTimer) {
-    twarn(`[bot] scheduleQrRescan diabaikan: timer sudah berjalan (delay=${delayMs}ms).`);
-    return; // 408 bisa beruntun; cukup satu reset auth + QR baru.
-  }
-  const seconds = Math.round(delayMs / 1000);
-  tlog(`[bot] scheduleQrRescan: dijadwalkan dalam ${seconds}s. _connecting=${_connecting} _currentSock=${!!_currentSock}`);
-  setBaileysStatus("qr_pending", {
-    connectedAs: null,
-    message: "Koneksi timeout (408). Auth akan direset dalam " + seconds + " detik untuk scan QR ulang.",
-  });
-  _qrRescanTimer = setTimeout(async () => {
-    _qrRescanTimer = null;
-    tlog("[bot] scheduleQrRescan: timer fired.");
-    if (_manuallyOff) {
-      tlog("[bot] scheduleQrRescan: dibatalkan karena _manuallyOff=true.");
-      return;
-    }
-
-    try { _currentSock?.end?.(new Error("408 rescan")); } catch (e) { twarn("[bot] scheduleQrRescan: gagal end() sock lama:", e?.message); }
-    _currentSock = null;
-    _connecting = false;
-
-    try {
-      tlog("[bot] scheduleQrRescan: mereset auth_state...");
-      await resetDeferredAuthState(config.wa.authDir);
-      tlog("📱 Timeout 408: auth_state direset. Menyiapkan QR baru untuk scan ulang...");
-      setBaileysStatus("connecting", { connectedAs: null });
-      await startBot();
-    } catch (e) {
-      twarn("[bot] reset auth setelah 408 gagal:", e?.message || e, e?.stack ? `\n${e.stack}` : "");
-      setBaileysStatus("disconnected", { connectedAs: null });
-      scheduleQrRescan();
-    }
+    startBot().catch((e) => console.warn("[bot] reconnect gagal:", e?.message));
   }, delayMs);
 }
 
 export async function startBot() {
   installProcessGuards();
-  tlog(`[bot] startBot() dipanggil. _connecting=${_connecting} _currentSock=${!!_currentSock} _manuallyOff=${_manuallyOff}`);
-  if (_connecting) {
-    twarn("[bot] startBot() dibatalkan: sudah ada proses connect yang berjalan (single-flight guard).");
-    return; // single-flight: jangan buat socket baru bila satu sedang berjalan
-  }
+  if (_connecting) return; // single-flight: jangan buat socket baru bila satu sedang berjalan
   _connecting = true;
   setBaileysStatus("connecting");
 
-  let sock;
-  try {
-    tlog("[bot] startBot(): memuat auth_state...");
-    const { state, saveCreds } = await useDeferredMultiFileAuthState(config.wa.authDir);
-    tlog(`[bot] startBot(): auth_state dimuat. registered=${!!state?.creds?.registered}`);
+  const { state, saveCreds } = await useMultiFileAuthState(config.wa.authDir);
+  const { version } = await fetchLatestBaileysVersion();
 
-    tlog("[bot] startBot(): mengambil versi Baileys terbaru...");
-    const { version } = await fetchLatestBaileysVersion();
-    tlog(`[bot] startBot(): versi Baileys = ${JSON.stringify(version)}`);
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false,
+    markOnlineOnConnect: false,
+    syncFullHistory: false,
+  });
+  _currentSock = sock;
 
-    sock = makeWASocket({
-      version,
-      auth: state,
-      logger: pino({ level: "silent" }),
-      printQRInTerminal: false,
-      markOnlineOnConnect: false,
-      syncFullHistory: false,
-    });
-    tlog("[bot] startBot(): socket Baileys berhasil dibuat.");
-    _currentSock = sock;
-
-    sock.ev.on("creds.update", saveCreds);
-  } catch (e) {
-    // Penting: kalau gagal di titik manapun sebelum socket jadi, reset _connecting.
-    // Kalau tidak, semua panggilan startBot() berikutnya (mis. dari scheduleReconnect)
-    // akan langsung return di guard single-flight di atas dan bot macet permanen.
-    twarn("[bot] startBot(): GAGAL sebelum socket terbentuk:", e?.message || e, e?.stack ? `\n${e.stack}` : "");
-    _connecting = false;
-    _currentSock = null;
-    setBaileysStatus("disconnected", { connectedAs: null });
-    throw e;
-  }
+  sock.ev.on("creds.update", saveCreds);
 
   let closedHandled = false; // satu socket → satu penanganan close
   sock.ev.on("connection.update", (u) => {
     const { connection, lastDisconnect, qr } = u;
-    if (sock !== _currentSock) {
-      twarn(`[bot][connection.update] event dari sock BASI diabaikan. connection=${connection} qr=${!!qr}`);
-      return;
-    }
-    tlog(`[bot][connection.update] connection=${connection ?? "(unchanged)"} qr=${!!qr} closedHandled=${closedHandled}` + (connection === "close" ? ` lastDisconnect=${describeDisconnect(lastDisconnect)}` : ""));
     if (qr) {
       // QR tidak lagi dicetak di terminal — scan lewat dashboard web (GET /wa/status) saja.
       console.log("📱 QR baru tersedia. Buka dashboard → Koneksi WhatsApp untuk scan.");
       QRCode.toDataURL(qr)
-        .then((dataUrl) => {
-          if (sock === _currentSock && !_manuallyOff) setBaileysStatus("qr_pending", { qr: dataUrl });
-        })
-        .catch((e) => twarn("[bot] gagal generate QR image:", e.message));
+        .then((dataUrl) => setBaileysStatus("qr_pending", { qr: dataUrl }))
+        .catch((e) => console.warn("[bot] gagal generate QR image:", e.message));
     }
     if (connection === "open") {
-      clearQrRescanTimer();
       const me = jidNormalizedUser(sock.user?.id);
-      tlog(`✅ Terhubung sebagai ${me}`);
+      console.log(`✅ Terhubung sebagai ${me}`);
       setBaileysStatus("connected", { connectedAs: me });
       // Daftarkan pengirim broadcast agar Agent 1 bisa menyebar info baru ke grup.
       setBroadcaster(async (jid, text, imagePath = null) => {
@@ -290,13 +200,9 @@ export async function startBot() {
       }
     }
     if (connection === "close") {
-      if (closedHandled) {
-        twarn("[bot][close] event close DUPLIKAT untuk socket yang sama, diabaikan (closedHandled=true).");
-        return;
-      }
+      if (closedHandled) return;
       closedHandled = true;
       _connecting = false;
-      tlog(`[bot][close] menangani close. code=${lastDisconnect?.error?.output?.statusCode} _manuallyOff=${_manuallyOff} detail=${describeDisconnect(lastDisconnect)}`);
       // Batalkan timer pending broadcast agar koneksi baru nanti yang memicu, bukan koneksi lama ini.
       if (_pendingBroadcastTimer) { clearTimeout(_pendingBroadcastTimer); _pendingBroadcastTimer = null; }
       setBroadcaster(null); // sock mati → jangan broadcast lewat koneksi basi; daftar ulang saat 'open'.
@@ -306,7 +212,6 @@ export async function startBot() {
       // Admin mematikan bot lewat dashboard (POST /wa/stop) → sock ini ditutup sengaja oleh
       // stopBaileys(), jangan timpa status "off" dan jangan auto-reconnect.
       if (_manuallyOff) {
-        tlog("[bot][close] _manuallyOff=true → tidak auto-reconnect, status diset 'off'.");
         setBaileysStatus("off", { connectedAs: null });
         return;
       }
@@ -314,26 +219,18 @@ export async function startBot() {
       const code = lastDisconnect?.error?.output?.statusCode;
 
       if (code === DisconnectReason.loggedOut) {
-        tlog(`❌ [bot][close] Logged out (code=${code}). Hapus folder ${config.wa.authDir} lalu jalankan ulang untuk scan QR baru.`);
+        console.log(`❌ Logged out. Hapus folder ${config.wa.authDir} lalu jalankan ulang untuk scan QR baru.`);
         setBaileysStatus("logged_out", { connectedAs: null });
         return;
       }
       if (code === DisconnectReason.connectionReplaced) {
         // Sesi digantikan koneksi lain (mis. Web/instance lain). Jangan dilawan → cegah badai 440.
-        tlog(`⚠️ [bot][close] Sesi digantikan koneksi lain (code=${code}). Berhenti agar tidak bentrok. Pastikan hanya 1 instance.`);
+        console.log("⚠️ Sesi digantikan koneksi lain (440). Berhenti agar tidak bentrok. Pastikan hanya 1 instance.");
         setBaileysStatus("disconnected");
         return;
       }
-      if (code === 408) {
-        // Timeout 408 sering berarti sesi Baileys macet di auth lama. Jangan loop reconnect 3 detik;
-        // reset auth setelah grace period singkat supaya dashboard mendapat QR baru untuk scan ulang.
-        _currentSock = null;
-        tlog("⚠️ [bot][close] Koneksi timeout (code=408). Akan scan QR ulang otomatis dalam 15 detik...");
-        scheduleQrRescan();
-        return;
-      }
-      // 515 restartRequired, 428 connectionClosed, dll → reconnect sekali (terjadwal).
-      tlog(`⚠️ [bot][close] Koneksi tertutup (code=${code}). Mencoba ulang dalam 3 detik... _reconnectTimer=${!!_reconnectTimer}`);
+      // 515 restartRequired, 428 connectionClosed, 408 timeout, dll → reconnect sekali (terjadwal).
+      console.log(`⚠️ Koneksi tertutup (code=${code}). Mencoba ulang dalam 3 detik...`);
       setBaileysStatus("disconnected");
       scheduleReconnect();
     }
@@ -347,12 +244,11 @@ export async function startBot() {
       try {
         await handleOne(sock, msg, botJid);
       } catch (err) {
-        twarn("[handler] error:", err.message, err?.stack ? `\n${err.stack}` : "");
+        console.error("[handler] error:", err.message);
       }
     }
   });
 
-  tlog("[bot] startBot(): selesai, socket siap & event listener terpasang.");
   return sock;
 }
 
@@ -366,11 +262,16 @@ async function handleOne(sock, msg, botJid) {
   const jid = msg.key.remoteJid;
   if (!jid) return;
 
+  // F2.1: bedakan grup vs japri dari JID.
   const isGroup = jid.endsWith("@g.us");
   const adapter = baileysAdapter(sock);
+  // Di grup, balas dengan MENGUTIP (reply) pesan pemicunya supaya jelas menjawab pertanyaan
+  // siapa — beberapa warga bisa bertanya berbarengan. Di japri (1-1) tak perlu kutipan.
   const send = (body) => adapter.send(jid, body, isGroup ? { quoted: msg } : undefined);
   let text = extractText(msg);
 
+  // Enforce registration before any expensive AI work. This keeps private numbers and
+  // mentioned groups on the /start path even when they send images or free text first.
   if (!isStartCommand(text)) {
     if (isGroup) {
       if (isMentioned(msg, sock)) {
@@ -401,6 +302,8 @@ async function handleOne(sock, msg, botJid) {
     }
   }
 
+  // Gambar (poster/screenshot/struk penipuan): baca jadi teks via vision lalu gabung dgn caption.
+  // Mahal → hanya saat bot memang akan merespons (japri, atau di grup ketika di-mention).
   const img = unwrap(msg.message)?.imageMessage;
   let imageText = null;
   let imageBuffer = null;
@@ -425,6 +328,9 @@ async function handleOne(sock, msg, botJid) {
     }
   }
 
+  // Dokumen/file (bukan gambar) — mis. ".exe"/".apk" yang disamarkan sebagai "undangan"/"surat" adalah
+  // modus malware yang umum. Isi file TIDAK diunduh/dipindai (di luar cakupan) — cukup kabari brain soal
+  // nama & jenis filenya lewat teks, karena itu saja sudah sinyal kuat (nama undangan tapi ekstensi .exe).
   const doc = unwrap(msg.message)?.documentMessage;
   if (doc && !isStartCommand(text)) {
     const willRespond = isGroup ? isMentioned(msg, sock) : true;
@@ -457,31 +363,36 @@ async function imageToText(sock, msg, img) {
   return { text, buffer };
 }
 
+/**
+ * Putuskan sesi lama (kalau ada) + hapus kredensial tersimpan, lalu mulai ulang supaya Baileys
+ * menerbitkan QR baru. Dipanggil dari dashboard (POST /wa/relink) — jadi admin bisa
+ * menghubungkan ulang / ganti nomor tanpa masuk ke server lewat SSH/CLI.
+ */
 export async function relinkBaileys() {
-  tlog(`[bot] relinkBaileys() dipanggil. _connecting=${_connecting} _currentSock=${!!_currentSock}`);
   _manuallyOff = false; // relink selalu menyalakan ulang, batalkan flag "dimatikan manual" kalau ada
   if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
-  clearQrRescanTimer();
-  try { await _currentSock?.logout(); } catch (e) { twarn("[bot] relinkBaileys: logout() gagal (diabaikan):", e?.message); }
-  try { _currentSock?.end?.(new Error("relink")); } catch (e) { twarn("[bot] relinkBaileys: end() gagal (diabaikan):", e?.message); }
+  try { await _currentSock?.logout(); } catch { /* sock mungkin sudah mati, abaikan */ }
+  try { _currentSock?.end?.(new Error("relink")); } catch { /* abaikan */ }
   _currentSock = null;
   _connecting = false;
-  await resetDeferredAuthState(config.wa.authDir).catch((e) => twarn("[bot] relinkBaileys: reset auth_state gagal:", e?.message));
+  await fs.promises.rm(config.wa.authDir, { recursive: true, force: true }).catch(() => {});
   setBaileysStatus("connecting", { connectedAs: null });
   return startBot();
 }
 
-
+/**
+ * Matikan bot dari dashboard (POST /wa/stop) TANPA menghapus kredensial tersimpan — beda dengan
+ * relinkBaileys() yang sengaja logout + hapus sesi untuk minta QR baru. Di sini sesi tetap
+ * tersimpan supaya startBaileys() bisa menyalakan lagi tanpa perlu scan ulang.
+ */
 export async function stopBaileys() {
-  tlog(`[bot] stopBaileys() dipanggil. _connecting=${_connecting} _currentSock=${!!_currentSock}`);
   _manuallyOff = true;
   if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
-  clearQrRescanTimer();
   if (_pendingBroadcastTimer) { clearTimeout(_pendingBroadcastTimer); _pendingBroadcastTimer = null; }
   setBroadcaster(null);
   setLaporgubNotifier(null);
   setAduanKontenNotifier(null);
-  try { _currentSock?.end?.(new Error("manual stop")); } catch (e) { twarn("[bot] stopBaileys: end() gagal (diabaikan):", e?.message); }
+  try { _currentSock?.end?.(new Error("manual stop")); } catch { /* sock mungkin sudah mati, abaikan */ }
   _currentSock = null;
   _connecting = false;
   setBaileysStatus("off", { connectedAs: null });
@@ -489,8 +400,6 @@ export async function stopBaileys() {
 
 /** Nyalakan lagi bot yang sebelumnya dimatikan lewat stopBaileys() (POST /wa/start). */
 export async function startBaileys() {
-  tlog(`[bot] startBaileys() dipanggil. _connecting=${_connecting} _currentSock=${!!_currentSock}`);
   _manuallyOff = false;
-  clearQrRescanTimer();
   return startBot();
 }
