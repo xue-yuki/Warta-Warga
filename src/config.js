@@ -91,26 +91,9 @@ export const config = {
   },
 
   // Web search untuk on-demand discovery sumber daerah baru.
-  // Default GRATIS tanpa key: DuckDuckGo. Provider lain: brightdata/google/searxng/serper/brave.
+  // Hanya Turboseek yang digunakan sekarang.
   search: {
-    provider:
-      process.env.SEARCH_PROVIDER ||
-      (process.env.BRIGHTDATA_API_TOKEN || process.env.BRIGHTDATA_BROWSER_WSS
-        ? "brightdata"
-        : process.env.GOOGLE_API_KEY && process.env.GOOGLE_CSE_ID
-          ? "google"
-          : process.env.SERPER_API_KEY
-            ? "serper"
-            : process.env.BRAVE_API_KEY
-              ? "brave"
-              : process.env.SEARXNG_URL
-                ? "searxng"
-                : "duckduckgo"),
-    serperKey: process.env.SERPER_API_KEY || "",
-    braveKey: process.env.BRAVE_API_KEY || "",
-    searxngUrl: process.env.SEARXNG_URL || "",
-    googleKey: process.env.GOOGLE_API_KEY || "",
-    googleCx: process.env.GOOGLE_CSE_ID || "",
+    provider: 'turboseek',
   },
 
   // Bright Data. Dua mode (pilih salah satu):
@@ -157,19 +140,10 @@ export const hasLaporGub = () => Boolean(config.laporgub.email && config.laporgu
 export const hasAduanKonten = () => Boolean(config.aduankonten.baseUrl);
 export const hasSupabase = () => Boolean(config.supabase.dbUrl);
 export const hasSearch = () => {
-  const s = config.search;
-  if (s.provider === "serper") return Boolean(s.serperKey);
-  if (s.provider === "brave") return Boolean(s.braveKey);
-  if (s.provider === "searxng") return Boolean(s.searxngUrl);
-  if (s.provider === "google") return Boolean(s.googleKey && s.googleCx);
-  if (s.provider === "brightdata") {
-    const b = config.brightdata;
-    return Boolean(b.browserWss || (b.token && b.serpZone));
-  }
-  return true; // duckduckgo: gratis, tanpa key
+  return config.search.provider === 'turboseek';
 };
 
 // Scraping Browser (Playwright) untuk render halaman JS + buka Google sendiri.
-export const hasBrightDataBrowser = () => Boolean(config.brightdata.browserWss);
+export const hasBrightDataBrowser = () => false;
 // Render halaman JS (cekbansos dll) saat scrape biasa gagal — via browser ATAU Web Unlocker REST.
-export const hasBrightDataUnlocker = () => Boolean(config.brightdata.browserWss || (config.brightdata.token && config.brightdata.unlockerZone));
+export const hasBrightDataUnlocker = () => false;

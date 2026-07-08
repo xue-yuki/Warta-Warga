@@ -8,8 +8,9 @@
 // dan alur bisnis lapor (catat_laporan cuma pintu masuk ke pipeline lama).
 
 import { chatWithTools, chat } from '../llm/openrouter.js';
-import { hasLLM } from '../config.js';
+import { hasLLM, hasSearch } from '../config.js';
 import { search } from '../kb/vectorStore.js';
+import { searchOfficialSources } from '../agent1/search.js';
 import { trendingModus } from '../db/index.js';
 import { simpanLaporanTool, humanModus } from './lapor.js';
 import { inspectUrl } from './checkurl.js';
@@ -19,6 +20,40 @@ import { humanWilayah, normalizeWilayahTag, isKabKota } from '../util/wilayah.js
 
 const MIN_SCORE = 0.25;
 const MAX_STEPS = 6; // lebih dari 4 karena kirim_aduan_layanan butuh round-trip konfirmasi
+const WEAK_VECTOR_MIN_SCORE = 0.45;
+const WEAK_VECTOR_GAP = 0.08;
+const WEAK_VECTOR_LEXICAL_MIN = 0.25;
+const QUERY_TOKEN_RE = /\b[0-9a-z]{3,}\b/gi;
+
+function queryTokens(text) {
+  return new Set(String(text || '').toLowerCase().match(QUERY_TOKEN_RE) || []);
+}
+
+function lexicalCoverage(queryTokensSet, text) {
+  if (!queryTokensSet.size) return 0;
+  const haystack = new Set(String(text || '').toLowerCase().match(QUERY_TOKEN_RE) || []);
+  let hits = 0;
+  for (const token of queryTokensSet) {
+    if (haystack.has(token)) hits += 1;
+  }
+  return queryTokensSet.size ? hits / queryTokensSet.size : 0;
+}
+
+function isWeakVectorSearch(hits, query) {
+  if (!hits.length) return true;
+  const top = hits[0];
+  const secondScore = hits[1]?.score || 0;
+  const scoreGap = top.score - secondScore;
+  const qTokens = queryTokens(query);
+  const overlap = lexicalCoverage(qTokens, `${top.program || ''} ${top.content || ''} ${top.sumber_url || ''}`);
+
+  return (
+    top.score < WEAK_VECTOR_MIN_SCORE ||
+    (top.score < 0.6 && scoreGap < WEAK_VECTOR_GAP) ||
+    (qTokens.size >= 2 && overlap < WEAK_VECTOR_LEXICAL_MIN) ||
+    (top.content?.length < 120 && top.score < 0.7)
+  );
+}
 
 const SYSTEM = `Kamu "WargaAI" dari TemanWarga, asisten WhatsApp untuk warga Indonesia — khususnya lansia dan warga yang tidak terbiasa teknologi. Tiga fokusmu (selaras dengan menu TemanWarga):
 (1) JagaWarga — cek hoaks & penipuan (verifikasi kabar, foto, dokumen, link),
@@ -125,8 +160,9 @@ Lansia sering kirim pesan pendek tanpa konteks. Kalau tidak jelas:
 TOOLS — PAKAI DENGAN INISIATIFMU
 - cari_sumber_resmi(kueri, wilayah?)
   → WAJIB dipanggil SEBELUM menyebut fakta/angka/syarat/jadwal bansos ATAU memverifikasi klaim/hoaks.
+  → WAJIB selalu dipanggil jika kamu ragu, bahkan ragu sedikit pun.
   → DILARANG menjawab fakta bansos dari ingatanmu sendiri.
-  → Kalau hasil kosong: jujur bilang belum ada info resminya. Arahkan ke cekbansos.kemensos.go.id atau RT/kelurahan. Jangan mengarang.
+  → Kalau hasil kosong: jujur bilang belum ada info resminya. Arahkan ke cekbansos.kemensos.go.id atau RT/kelurahan (jika tentang bansos) atau web pemerintah. Jangan mengarang.
 
 - tren_penipuan(wilayah?)
   → Panggil saat warga tanya modus yang lagi marak.
@@ -505,7 +541,9 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           searched = true;
           if (aksi !== 'lapor') aksi = 'info';
           const q = [args.kueri, args.wilayah].filter(Boolean).join(' ');
+          console.log('[brain] cari_sumber_resmi call', { q, args });
           const hits = (await search(q || text, { scopeTags, k: 4 })).filter((h) => h.score >= MIN_SCORE);
+          console.log('[brain] vector search hits', hits.length, hits.map((h) => ({ score: h.score, sumber_url: h.sumber_url })).slice(0, 5));
           if (hits.length) grounded = true;
           // allowedUrls: SEMUA hit (biar URL yg LLM kutip sendiri dari mana pun tak ke-mangle jadi
           // "[sumber resmi]" oleh sanitizeUrls). usedSources (dasar auto-cite fallback di bawah):
@@ -514,9 +552,26 @@ export async function think(text, { history = [], scopeTags = null, wilayahTag =
           // klaim yg sama sekali beda topik) — men-dump semuanya sebagai "sumber resmi" menyesatkan.
           hits.forEach((h) => allowedUrls.add(h.sumber_url));
           if (hits.length) usedSources.add(hits[0].sumber_url);
-          result = hits.length
-            ? hits.map((h, i) => `[${i + 1}] (sumber: ${h.sumber_url})\n${h.content}`).join('\n\n')
-            : 'TIDAK ADA hasil di sumber resmi terkurasi untuk kueri ini.';
+          const weakVectorSearch = isWeakVectorSearch(hits, q || text);
+          console.log('[brain] weakVectorSearch decision', { weakVectorSearch, topScore: hits[0]?.score, secondScore: hits[1]?.score, scoreGap: hits[0] ? hits[0].score - (hits[1]?.score || 0) : 0, query: q || text });
+          if (hits.length == 0) {
+            result = hits.map((h, i) => `[${i + 1}] (sumber: ${h.sumber_url})\n${h.content}`).join('\n\n');
+          } else {
+            let fallbackUrls = [];
+            if (hasSearch()) {
+              fallbackUrls = await searchOfficialSources(q || text, { limit: 4, preferTurboseek: weakVectorSearch });
+              console.log('[brain] searchOfficialSources fallback urls', { count: fallbackUrls.length, weakVectorSearch, urls: fallbackUrls });
+              fallbackUrls.forEach((u) => {
+                allowedUrls.add(u);
+                usedSources.add(u);
+              });
+            }
+            result = 'TIDAK ADA hasil di sumber resmi terkurasi untuk kueri ini.';
+            if (fallbackUrls.length) {
+              result += '\n\nNamun saya menemukan sumber resmi berikut dari pencarian internet:';
+              result += '\n' + fallbackUrls.map((u, i) => `[${i + 1}] ${u}`).join('\n');
+            }
+          }
         } else if (tc.function?.name === 'tren_penipuan') {
           // 'verifikasi', BUKAN 'info': aksi='info' dipakai pipeline.js sbg pemicu on-demand
           // discovery cakupan bansos per-wilayah — tren_penipuan tak ada hubungannya dgn itu.
